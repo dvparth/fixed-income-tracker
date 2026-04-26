@@ -238,7 +238,7 @@ export default function DepositEditorView({
             <div className="editor-grid">
               <label className="field">
                 <span>Principal amount</span>
-                <input name="principalAmount" type="number" value={formValues.principalAmount} onChange={handleFormChange} placeholder="e.g. 100000" autoComplete="off" />
+                <input className="amount-input" name="principalAmount" type="number" value={formValues.principalAmount} onChange={handleFormChange} placeholder="e.g. 100000" autoComplete="off" />
                 {formErrors.principalAmount && <small className="field-error">{formErrors.principalAmount}</small>}
               </label>
               <label className="field">

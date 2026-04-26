@@ -38,7 +38,63 @@ export default function DepositsView({
   formatCurrency,
   formatDate,
   formatTenure,
+  todayTime,
 }) {
+  const getElapsedPercent = (deposit) => {
+    const start = new Date(`${deposit.investmentDate}T00:00:00`).getTime()
+    const end = new Date(`${deposit.maturityDate}T00:00:00`).getTime()
+
+    if (Number.isNaN(start) || Number.isNaN(end) || end <= start) {
+      return 0
+    }
+
+    if (deposit.status === 'Closed' || todayTime >= end) {
+      return 100
+    }
+
+    if (todayTime <= start) {
+      return 0
+    }
+
+    return Math.max(0, Math.min(100, ((todayTime - start) / (end - start)) * 100))
+  }
+
+  const renderDepositCard = (deposit) => (
+    <>
+      <div className="deposit-card-head">
+        <div className="deposit-brand">
+          <div className="bank-avatar" aria-hidden="true">
+            {String(deposit.bankName || '?').trim().slice(0, 1).toUpperCase()}
+          </div>
+          <div className="deposit-brand-copy">
+            <strong>{deposit.bankName}</strong>
+            <span>{deposit.accountNumber || deposit.id}</span>
+          </div>
+        </div>
+        <span className={deposit.status === 'Closed' ? 'pill closed' : 'pill open'}>
+          {deposit.status}
+        </span>
+      </div>
+      <div className="deposit-amount-row">
+        <strong className="deposit-amount">{formatCurrency(deposit.principalAmount)}</strong>
+        <span className="deposit-tenure">{formatTenure(deposit)}</span>
+      </div>
+      <div className="deposit-meta">
+        <span>{deposit.holderName}</span>
+        <span>{deposit.instrumentType}</span>
+        <span>{getPayoutModeLabel(deposit)}</span>
+      </div>
+      {deposit.status !== 'Closed' && (
+        <div className="deposit-progress" aria-hidden="true">
+          <span className="deposit-progress-bar" style={{ width: `${getElapsedPercent(deposit)}%` }} />
+        </div>
+      )}
+      {needsPeriodicPayoutSetup(deposit) && (
+        <p className="inline-warning">Missing periodic payout before/after TDS</p>
+      )}
+    </>
+  )
+
   const renderMobileDetailSection = (sectionKey, title, subtitle, children) => (
     <section className="mobile-detail-section">
       <button
@@ -180,23 +236,7 @@ export default function DepositsView({
             className={selectedId === deposit.id ? 'deposit-card selected' : 'deposit-card'}
             onClick={() => openDepositDetail(deposit.id)}
           >
-            <div className="deposit-topline">
-              <strong>{deposit.bankName}</strong>
-              <span className={deposit.status === 'Closed' ? 'pill closed' : 'pill open'}>
-                {deposit.status}
-              </span>
-            </div>
-            <p>
-              {deposit.holderName} | {deposit.instrumentType}
-            </p>
-            <p>
-              {formatCurrency(deposit.principalAmount)} | {formatTenure(deposit)}
-            </p>
-            <p>{deposit.accountNumber || deposit.id}</p>
-            <p>{getPayoutModeLabel(deposit)}</p>
-            {needsPeriodicPayoutSetup(deposit) && (
-              <p className="inline-warning">Missing periodic payout before/after TDS</p>
-            )}
+            {renderDepositCard(deposit)}
           </button>
         ))}
       </div>

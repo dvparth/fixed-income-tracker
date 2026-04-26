@@ -30,7 +30,7 @@ function App() {
   const [editingId, setEditingId] = useState(null)
   const [formValues, setFormValues] = useState(emptyForm)
   const [formErrors, setFormErrors] = useState({})
-  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false)
+  const setIsMobileNavOpen = () => {}
   const [selectedFundingEventId, setSelectedFundingEventId] = useState('')
   const [fundingAmountDraft, setFundingAmountDraft] = useState('')
   const [archiveTargetId, setArchiveTargetId] = useState(null)
@@ -44,6 +44,7 @@ function App() {
   const [mastersIntent, setMastersIntent] = useState(null)
   const [mastersViewSeed, setMastersViewSeed] = useState(0)
   const [mastersReturnTarget, setMastersReturnTarget] = useState(null)
+  const [activeHelpKey, setActiveHelpKey] = useState(null)
   const currentFinancialYear = useMemo(() => getCurrentFinancialYearRange(TODAY), [])
   const [selectedFinancialYear, setSelectedFinancialYear] = useState(currentFinancialYear.label)
   const activeDeposits = useMemo(
@@ -632,20 +633,6 @@ function App() {
     })
   }
 
-  const openPendingInterestView = () => {
-    setIsMobileNavOpen(false)
-    setInterestFocusMode((current) => (current === 'pending' ? 'all' : 'pending'))
-    setMaturityFocusMode('all')
-    setActiveTab('dashboard')
-  }
-
-  const openPendingMaturityView = () => {
-    setIsMobileNavOpen(false)
-    setMaturityFocusMode((current) => (current === 'pending' ? 'all' : 'pending'))
-    setInterestFocusMode('all')
-    setActiveTab('dashboard')
-  }
-
   const openDepositFromInterestEvent = (event) => {
     setSelectedId(event.depositId)
     setMobileDepositsScreen('detail')
@@ -1200,8 +1187,26 @@ function App() {
     searchText.trim() ? `Search: ${searchText.trim()}` : null,
     !showClosed ? 'Open only' : null,
   ].filter(Boolean)
-  const showMobileCompactHeader = isMobile && (activeTab === 'deposits' || activeTab === 'masters')
-  const showFullHeroCard = !isMobileEditorScreen && !showMobileCompactHeader
+  const showMobileAppHeader = isMobile && !isMobileEditorScreen
+  const showFullHeroCard = !isMobile && !isMobileEditorScreen
+  const showMobileHeroStrip = isMobile && activeTab === 'dashboard' && !isMobileEditorScreen
+  const helpCopy = {
+    'active-principal': 'This is the total amount still invested in open deposits.',
+    'interest-realised': 'This is the interest already earned in the selected financial year.',
+    'unused-maturity-cash':
+      'This is maturity money already received but not yet used in a new investment.',
+    'interest-not-reused': 'This is interest already received but still sitting unused.',
+    'upcoming-interest':
+      'This only shows future interest for deposits that pay interest before maturity, like quarterly or yearly payout products.',
+    'maturity-section':
+      maturityFocusMode === 'pending'
+        ? 'These are deposits whose maturity money has come in but is still not fully used.'
+        : 'These are the next deposits that will mature soon.',
+    'interest-section':
+      interestFocusMode === 'pending'
+        ? 'These are interest amounts already received but not yet fully used in new deposits.'
+        : 'These are future interest payouts expected from deposits that pay before maturity.',
+  }
 
   const toggleMobileDetailSection = (sectionKey) => {
     setMobileDetailSections((current) => ({
@@ -1210,55 +1215,55 @@ function App() {
     }))
   }
 
+  const renderHelpHint = (key, text) => (
+    <span className="help-inline">
+      <button
+        type="button"
+        className="help-trigger"
+        aria-label="Show simple explanation"
+        aria-expanded={activeHelpKey === key}
+        onClick={() => setActiveHelpKey((current) => (current === key ? null : key))}
+      >
+        i
+      </button>
+      {!isMobile && activeHelpKey === key && <span className="help-popover">{text}</span>}
+    </span>
+  )
+
   return (
     <div className="shell">
-      {showMobileCompactHeader && (
-        <header className="mobile-page-bar">
-          <div>
-            <p className="eyebrow">FD Tracker</p>
-            <strong className="mobile-active-tab">{mobileCompactHeaderTitle}</strong>
+      {showMobileAppHeader && (
+        <header className="app-topbar">
+          <div className="app-topbar-copy">
+            <strong className="app-topbar-title">YieldFlow</strong>
+            <span className="app-topbar-subtitle">{mobileCompactHeaderTitle}</span>
           </div>
           <button
             type="button"
-            className="menu-btn"
-            onClick={() => setIsMobileNavOpen((current) => !current)}
-            aria-expanded={isMobileNavOpen}
-            aria-controls="mobile-sections"
+            className={activeTab === 'masters' ? 'icon-btn active' : 'icon-btn'}
+            onClick={() => {
+              setActiveTab('masters')
+              setIsMobileNavOpen(false)
+            }}
+            aria-label="Open masters"
           >
-            {isMobileNavOpen ? 'Close' : 'Menu'}
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 8.75a3.25 3.25 0 1 0 0 6.5a3.25 3.25 0 0 0 0-6.5Zm8.25 3.25l-1.54-.53a6.72 6.72 0 0 0-.52-1.24l.73-1.46a.9.9 0 0 0-.17-1.04l-1.48-1.48a.9.9 0 0 0-1.04-.17l-1.46.73c-.4-.21-.82-.38-1.24-.52l-.53-1.54a.9.9 0 0 0-.85-.6h-2.1a.9.9 0 0 0-.85.6l-.53 1.54c-.42.14-.84.31-1.24.52l-1.46-.73a.9.9 0 0 0-1.04.17L5.25 7.73a.9.9 0 0 0-.17 1.04l.73 1.46c-.21.4-.38.82-.52 1.24l-1.54.53a.9.9 0 0 0-.6.85v2.1c0 .39.25.73.6.85l1.54.53c.14.42.31.84.52 1.24l-.73 1.46a.9.9 0 0 0 .17 1.04l1.48 1.48c.28.28.7.35 1.04.17l1.46-.73c.4.21.82.38 1.24.52l.53 1.54c.12.35.46.6.85.6h2.1c.39 0 .73-.25.85-.6l.53-1.54c.42-.14.84-.31 1.24-.52l1.46.73c.34.18.76.11 1.04-.17l1.48-1.48a.9.9 0 0 0 .17-1.04l-.73-1.46c.21-.4.38-.82.52-1.24l1.54-.53c.35-.12.6-.46.6-.85v-2.1a.9.9 0 0 0-.6-.85Z" fill="currentColor" />
+            </svg>
           </button>
         </header>
       )}
 
+      {showMobileHeroStrip && (
+        <section className="mobile-hero-strip">
+          <p>Track maturity, interest payouts, and reinvestment in one place.</p>
+        </section>
+      )}
+
       {showFullHeroCard && (
         <header className="hero-card">
-          <div className="hero-mobile-bar">
-            <div>
-              <p className="eyebrow">FD Tracker</p>
-              <strong className="mobile-active-tab">
-                {activeTab === 'dashboard'
-                  ? 'Dashboard'
-                  : activeTab === 'deposits'
-                    ? 'Deposits'
-                    : activeTab === 'masters'
-                      ? 'Masters'
-                      : editingId
-                        ? 'Edit deposit'
-                        : 'Add deposit'}
-              </strong>
-            </div>
-            <button
-              type="button"
-              className="menu-btn"
-              onClick={() => setIsMobileNavOpen((current) => !current)}
-              aria-expanded={isMobileNavOpen}
-              aria-controls="mobile-sections"
-            >
-              {isMobileNavOpen ? 'Close' : 'Menu'}
-            </button>
-          </div>
           <div>
-            <p className="eyebrow">Mobile First FD Tracker</p>
+            <p className="eyebrow">YieldFlow</p>
             <h1>Track maturity, quarterly interest, annual bond payouts, and reinvestment.</h1>
             <p className="hero-copy">
               This version now treats interest credits as separate cash sources, so SCSS quarterly
@@ -1291,10 +1296,10 @@ function App() {
         </section>
       )}
 
-      {!isMobileEditorScreen && (
+      {!isMobileEditorScreen && !isMobile && (
         <nav
           id="mobile-sections"
-          className={isMobileNavOpen ? 'tab-bar mobile-open' : 'tab-bar'}
+          className="tab-bar"
           aria-label="Sections"
         >
           {[
@@ -1319,6 +1324,49 @@ function App() {
             </button>
           ))}
         </nav>
+      )}
+
+      {!isMobileEditorScreen && isMobile && (
+        <nav className="bottom-nav" aria-label="Primary navigation">
+          {[
+            ['dashboard', 'Dashboard'],
+            ['deposits', 'Deposits'],
+            ['editor', editingId ? 'Edit' : 'Add'],
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              className={activeTab === value ? 'bottom-nav-item active' : 'bottom-nav-item'}
+              onClick={() => {
+                setActiveTab(value)
+                if (value === 'deposits') {
+                  setMobileDepositsScreen('list')
+                }
+              }}
+            >
+              <span className="bottom-nav-icon" aria-hidden="true">
+                {value === 'dashboard' ? '◫' : value === 'deposits' ? '▤' : '＋'}
+              </span>
+              <span>{label}</span>
+            </button>
+          ))}
+        </nav>
+      )}
+
+      {isMobile && activeHelpKey && helpCopy[activeHelpKey] && (
+        <div className="mobile-help-sheet" role="status" aria-live="polite">
+          <div className="mobile-help-sheet-copy">
+            <strong>Quick help</strong>
+            <p>{helpCopy[activeHelpKey]}</p>
+          </div>
+          <button
+            type="button"
+            className="secondary-btn compact ghost-btn"
+            onClick={() => setActiveHelpKey(null)}
+          >
+            Close
+          </button>
+        </div>
       )}
 
       {activeTab === 'dashboard' && (
@@ -1348,35 +1396,42 @@ function App() {
 
             <div className="stats-grid">
               <article className="stat-card accent">
-                <span>Active principal</span>
+                <span className="stat-label-row">
+                  <span>Active principal</span>
+                  {renderHelpHint('active-principal', 'This is the total amount still invested in open deposits.')}
+                </span>
                 <strong>{formatCurrency(stats.openPrincipal)}</strong>
                 <small>{stats.openDeposits} open</small>
               </article>
               <article className="stat-card">
-                <span>Interest realised</span>
+                <span className="stat-label-row">
+                  <span>Interest realised</span>
+                  {renderHelpHint('interest-realised', 'This is the interest already earned in the selected financial year.')}
+                </span>
                 <strong>{formatCurrency(stats.realisedInterest)}</strong>
                 <small>FY {stats.currentFinancialYearLabel}</small>
               </article>
               <article className="stat-card">
-                <span>Unused maturity cash</span>
+                <span className="stat-label-row">
+                  <span>Unused maturity cash</span>
+                  {renderHelpHint('unused-maturity-cash', 'This is maturity money already received but not yet used in a new investment.')}
+                </span>
                 <strong>{formatCurrency(stats.uninvestedMaturityCash)}</strong>
                 <small>FY {stats.currentFinancialYearLabel}</small>
-                <button type="button" className="mini-link" onClick={openPendingMaturityView}>
-                  {maturityFocusMode === 'pending' ? 'Back to timeline' : 'View cash to reinvest'}
-                </button>
               </article>
               <article className="stat-card warning">
-                <span>Interest not reused</span>
+                <span className="stat-label-row">
+                  <span>Interest not reused</span>
+                  {renderHelpHint('interest-not-reused', 'This is interest already received but still sitting unused.')}
+                </span>
                 <strong>{formatCurrency(stats.uninvestedInterestCash)}</strong>
                 <small>FY {stats.currentFinancialYearLabel}</small>
-                <button type="button" className="mini-link" onClick={openPendingInterestView}>
-                  {interestFocusMode === 'pending'
-                    ? 'Back to timeline'
-                    : 'View cash to reinvest'}
-                </button>
               </article>
               <article className="stat-card">
-                <span>Upcoming interest</span>
+                <span className="stat-label-row">
+                  <span>Upcoming interest</span>
+                  {renderHelpHint('upcoming-interest', 'This only shows future interest for deposits that pay interest before maturity, like quarterly or yearly payout products.')}
+                </span>
                 <strong>{formatCurrency(stats.futureInterestCash)}</strong>
                 <small>FY {stats.currentFinancialYearLabel}</small>
               </article>
@@ -1385,9 +1440,17 @@ function App() {
             <article className="panel">
               <div className="section-head">
                 <div>
-                  <h2>
-                    {maturityFocusMode === 'pending' ? 'Maturity to reinvest' : 'Maturity timeline'}
-                  </h2>
+                  <div className="section-title-row">
+                    <h2>
+                      {maturityFocusMode === 'pending' ? 'Maturity to reinvest' : 'Maturity timeline'}
+                    </h2>
+                    {renderHelpHint(
+                      'maturity-section',
+                      maturityFocusMode === 'pending'
+                        ? 'These are deposits whose maturity money has come in but is still not fully used.'
+                        : 'These are the next deposits that will mature soon.',
+                    )}
+                  </div>
                   <p>
                     {maturityFocusMode === 'pending'
                       ? 'Closed deposits whose maturity cash is still waiting to be reused.'
@@ -1396,12 +1459,12 @@ function App() {
                 </div>
                 <button
                   type="button"
-                  className="secondary-btn compact"
+                  className={maturityFocusMode === 'pending' ? 'secondary-btn compact ghost-btn dashboard-toggle-btn' : 'secondary-btn compact dashboard-action-btn dashboard-toggle-btn'}
                   onClick={() =>
                     setMaturityFocusMode((current) => (current === 'pending' ? 'all' : 'pending'))
                   }
                 >
-                  {maturityFocusMode === 'pending' ? 'Back to timeline' : 'View cash to reinvest'}
+                  {maturityFocusMode === 'pending' ? 'Back' : 'View cash to reinvest'}
                 </button>
               </div>
               <div className="list">
@@ -1439,24 +1502,32 @@ function App() {
             <article className="panel">
               <div className="section-head">
                 <div>
-                  <h2>
-                    {interestFocusMode === 'pending' ? 'Interest to reinvest' : 'Interest timeline'}
-                  </h2>
+                  <div className="section-title-row">
+                    <h2>
+                      {interestFocusMode === 'pending' ? 'Interest to reinvest' : 'Interest timeline'}
+                    </h2>
+                    {renderHelpHint(
+                      'interest-section',
+                      interestFocusMode === 'pending'
+                        ? 'These are interest amounts already received but not yet fully used in new deposits.'
+                        : 'These are future interest payouts expected from deposits that pay before maturity.',
+                    )}
+                  </div>
                   <p>
                     {interestFocusMode === 'pending'
                       ? 'Interest already received but not yet fully reused.'
                       : 'Upcoming interest receipts that may be reused.'}
                   </p>
                 </div>
-                {interestFocusMode === 'pending' && (
-                  <button
-                    type="button"
-                    className="secondary-btn compact"
-                    onClick={() => setInterestFocusMode('all')}
-                  >
-                    Back to timeline
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className={interestFocusMode === 'pending' ? 'secondary-btn compact ghost-btn dashboard-toggle-btn' : 'secondary-btn compact dashboard-action-btn dashboard-toggle-btn'}
+                  onClick={() =>
+                    setInterestFocusMode((current) => (current === 'pending' ? 'all' : 'pending'))
+                  }
+                >
+                  {interestFocusMode === 'pending' ? 'Back' : 'View cash to reinvest'}
+                </button>
               </div>
               <div className="list">
                 {(interestFocusMode === 'pending'
@@ -1498,11 +1569,14 @@ function App() {
                     </button>
                   ))
                 ) : (
-                  <p className="lineage-empty">
-                    {interestFocusMode === 'pending'
-                      ? 'No received interest is waiting for reinvestment.'
-                      : 'No upcoming periodic interest payouts in the schedule.'}
-                  </p>
+                  interestFocusMode === 'pending' ? (
+                    <div className="empty-state-card">
+                      <div className="empty-state-icon" aria-hidden="true">○</div>
+                      <p className="lineage-empty">No received interest is waiting for reinvestment.</p>
+                    </div>
+                  ) : (
+                    <p className="lineage-empty">No upcoming periodic interest payouts in the schedule.</p>
+                  )
                 )}
               </div>
             </article>
@@ -1587,6 +1661,7 @@ function App() {
           formatCurrency={formatCurrency}
           formatDate={formatDate}
           formatTenure={formatTenure}
+          todayTime={TODAY.getTime()}
         />
       )}
 
