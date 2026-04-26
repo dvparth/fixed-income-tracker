@@ -153,6 +153,7 @@ export default function MastersView({
   saveMasterData,
   returnToEditor,
   showReturnToEditor,
+  isReadOnly = false,
 }) {
   const [formState, setFormState] = useState(() => createEditableMasterData(masterData, initialIntent))
 
@@ -274,6 +275,9 @@ export default function MastersView({
 
   const handleSubmit = (event) => {
     event.preventDefault()
+    if (isReadOnly) {
+      return
+    }
     saveMasterData(sanitizeMasterData(formState))
   }
 
@@ -284,7 +288,12 @@ export default function MastersView({
           <h2>{title}</h2>
           <p>{description}</p>
         </div>
-        <button type="button" className="secondary-btn compact" onClick={() => addNamedListItem(sectionKey)}>
+        <button
+          type="button"
+          className="secondary-btn compact"
+          onClick={() => addNamedListItem(sectionKey)}
+          disabled={isReadOnly}
+        >
           {addLabel}
         </button>
       </div>
@@ -296,10 +305,16 @@ export default function MastersView({
                 <span>Name</span>
                 <input
                   value={item.name}
+                  disabled={isReadOnly}
                   onChange={(event) => updateNamedListItem(sectionKey, item.key, 'name', event.target.value)}
                 />
               </label>
-              <button type="button" className="secondary-btn compact" onClick={() => removeNamedListItem(sectionKey, item.key)}>
+              <button
+                type="button"
+                className="secondary-btn compact"
+                onClick={() => removeNamedListItem(sectionKey, item.key)}
+                disabled={isReadOnly}
+              >
                 Remove
               </button>
             </div>
@@ -332,6 +347,12 @@ export default function MastersView({
           </div>
         )}
 
+        {isReadOnly && (
+          <div className="status-banner warning">
+            You are viewing shared master data in read-only mode.
+          </div>
+        )}
+
         <form className="editor-form" onSubmit={handleSubmit}>
           <section className="editor-section">
             <div className="section-head">
@@ -339,7 +360,7 @@ export default function MastersView({
                 <h2>Owners</h2>
                 <p>These values are used for investment ownership and alias-based search.</p>
               </div>
-              <button type="button" className="secondary-btn compact" onClick={addOwner}>
+              <button type="button" className="secondary-btn compact" onClick={addOwner} disabled={isReadOnly}>
                 Add owner
               </button>
             </div>
@@ -350,19 +371,29 @@ export default function MastersView({
                     <div className={isMobile ? 'editor-grid' : 'editor-grid'}>
                       <label className="field">
                         <span>Owner name</span>
-                        <input value={owner.name} onChange={(event) => updateOwner(owner.key, 'name', event.target.value)} />
+                        <input
+                          value={owner.name}
+                          disabled={isReadOnly}
+                          onChange={(event) => updateOwner(owner.key, 'name', event.target.value)}
+                        />
                       </label>
                       <label className="field">
                         <span>Aliases</span>
                         <input
                           value={owner.aliasesText}
+                          disabled={isReadOnly}
                           onChange={(event) => updateOwner(owner.key, 'aliasesText', event.target.value)}
                           placeholder="mom, mummy, maa"
                         />
                       </label>
                     </div>
                     <div className="masters-card-actions">
-                      <button type="button" className="secondary-btn compact" onClick={() => removeOwner(owner.key)}>
+                      <button
+                        type="button"
+                        className="secondary-btn compact"
+                        onClick={() => removeOwner(owner.key)}
+                        disabled={isReadOnly}
+                      >
                         Remove owner
                       </button>
                     </div>
@@ -380,7 +411,7 @@ export default function MastersView({
                 <h2>Institutions and branches</h2>
                 <p>Maintain the bank or issuer list and the branches available under each one.</p>
               </div>
-              <button type="button" className="secondary-btn compact" onClick={addInstitution}>
+              <button type="button" className="secondary-btn compact" onClick={addInstitution} disabled={isReadOnly}>
                 Add institution
               </button>
             </div>
@@ -393,11 +424,17 @@ export default function MastersView({
                         <span>Institution</span>
                         <input
                           value={institution.name}
+                          disabled={isReadOnly}
                           onChange={(event) => updateInstitution(institution.key, 'name', event.target.value)}
                           placeholder="HDFC Bank"
                         />
                       </label>
-                      <button type="button" className="secondary-btn compact" onClick={() => removeInstitution(institution.key)}>
+                      <button
+                        type="button"
+                        className="secondary-btn compact"
+                        onClick={() => removeInstitution(institution.key)}
+                        disabled={isReadOnly}
+                      >
                         Remove institution
                       </button>
                     </div>
@@ -407,7 +444,12 @@ export default function MastersView({
                           <h3>Branches</h3>
                           <p>Keep branch names under this institution.</p>
                         </div>
-                        <button type="button" className="secondary-btn compact" onClick={() => addBranch(institution.key)}>
+                        <button
+                          type="button"
+                          className="secondary-btn compact"
+                          onClick={() => addBranch(institution.key)}
+                          disabled={isReadOnly}
+                        >
                           Add branch
                         </button>
                       </div>
@@ -418,11 +460,17 @@ export default function MastersView({
                               <span>Branch</span>
                               <input
                                 value={branch.name}
+                                disabled={isReadOnly}
                                 onChange={(event) => updateBranch(institution.key, branch.key, event.target.value)}
                                 placeholder="Jaipur"
                               />
                             </label>
-                            <button type="button" className="secondary-btn compact" onClick={() => removeBranch(institution.key, branch.key)}>
+                            <button
+                              type="button"
+                              className="secondary-btn compact"
+                              onClick={() => removeBranch(institution.key, branch.key)}
+                              disabled={isReadOnly}
+                            >
                               Remove
                             </button>
                           </div>
@@ -447,7 +495,7 @@ export default function MastersView({
           )}
 
           <div className="editor-actions">
-            <button type="submit" className="primary-btn" disabled={isSavingMasters}>
+            <button type="submit" className="primary-btn" disabled={isSavingMasters || isReadOnly}>
               {isSavingMasters ? 'Saving masters...' : 'Save masters'}
             </button>
           </div>

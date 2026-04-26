@@ -1,6 +1,6 @@
 # Fixed Income Tracker
 
-Fixed Income Tracker is a mobile-first full-stack app for tracking fixed deposits, SCSS positions, bond-style instruments, maturity rollovers, and interest-led reinvestment flows.
+YieldFlow is a mobile-first full-stack app for tracking fixed deposits, SCSS positions, bond-style instruments, maturity rollovers, and interest-led reinvestment flows.
 
 It is designed around one practical problem: fixed-income investments do not live independently. Maturity proceeds and periodic interest receipts often become the funding source for new investments, and this app helps track that lineage cleanly.
 
@@ -55,7 +55,30 @@ npm.cmd install
 Copy-Item .env.example .env
 ```
 
-3. Set `MONGO_URI` in `.env`
+3. Set the server and UI environment variables in `.env`:
+
+```env
+SERVER_PORT=4000
+SERVER_MONGO_URI=mongodb://localhost:27017/YieldFlow
+SERVER_GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
+SERVER_ALLOWED_ORIGINS=http://localhost:5173
+SERVER_COOKIE_SAME_SITE=lax
+SERVER_COOKIE_SECURE=false
+VITE_GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
+VITE_API_BASE_URL=
+VITE_API_PROXY_TARGET=http://localhost:4000
+SERVER_SESSION_SECRET=replace-with-a-long-random-secret
+SERVER_ADMIN_EMAILS=admin@example.com
+```
+
+Use `VITE_API_BASE_URL` when the frontend should call an absolute backend URL directly.
+Leave it blank in local development and use `VITE_API_PROXY_TARGET` for the Vite `/api` proxy instead.
+
+For cross-domain production deployments:
+- set `VITE_API_BASE_URL` to your deployed API origin
+- set `SERVER_ALLOWED_ORIGINS` to your deployed frontend origin
+- set `SERVER_COOKIE_SAME_SITE=none`
+- set `SERVER_COOKIE_SECURE=true`
 
 4. Start the app:
 
@@ -77,6 +100,7 @@ Frontend runs on Vite and proxies `/api` requests to the Express backend.
 - Funding references use stable event identifiers such as `maturity:<depositId>` and `interest:<depositId>:<yyyy-mm-dd>`.
 - The app now operates against stored data only, with no in-memory demo fallback.
 - Reference values such as owners, funding sources, institutions, branches, and instrument types now flow through a shared master-data model.
+- MongoDB collections are isolated for this application in a dedicated YieldFlow database: `investments`, `masterData`, `users`, `sessions`, `portfolioShares`, and `auditLogs`.
 
 ## Roadmap
 

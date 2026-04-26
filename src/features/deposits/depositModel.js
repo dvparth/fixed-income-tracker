@@ -461,7 +461,15 @@ export const normalizeDeposit = (formValues, existingId, fallbackSrNo) => {
 }
 
 export const requestJson = async (url, options = {}) => {
-  const response = await fetch(url, {
+  const apiBaseUrl = String(import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/$/, '')
+  const normalizedUrl = String(url || '')
+  const requestUrl =
+    apiBaseUrl && normalizedUrl.startsWith('/')
+      ? `${apiBaseUrl}${normalizedUrl}`
+      : normalizedUrl
+
+  const response = await fetch(requestUrl, {
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       ...(options.headers || {}),

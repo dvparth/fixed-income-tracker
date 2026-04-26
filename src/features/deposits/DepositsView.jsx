@@ -1,5 +1,6 @@
 export default function DepositsView({
   isMobile,
+  isReadOnly,
   mobileDepositsScreen,
   isMobileFiltersOpen,
   setIsMobileFiltersOpen,
@@ -20,6 +21,8 @@ export default function DepositsView({
   selectedInterestSummary,
   archiveTargetId,
   isArchiving,
+  deleteTargetId,
+  isDeleting,
   startNewDeposit,
   openDepositDetail,
   setMobileDepositsScreen,
@@ -28,6 +31,9 @@ export default function DepositsView({
   startArchive,
   cancelArchive,
   confirmArchive,
+  startDelete,
+  cancelDelete,
+  confirmDelete,
   fillFromSelectedMaturity,
   fillFromAllAvailableInterest,
   applyCashFlowSource,
@@ -39,6 +45,7 @@ export default function DepositsView({
   formatDate,
   formatTenure,
   todayTime,
+  canDeletePortfolio,
 }) {
   const getElapsedPercent = (deposit) => {
     const start = new Date(`${deposit.investmentDate}T00:00:00`).getTime()
@@ -124,9 +131,11 @@ export default function DepositsView({
           <h2>Deposits</h2>
           <p>Search by bank, holder, alias like mummy or wife, instrument, account number, investment id, or source event.</p>
         </div>
-        <button type="button" className="secondary-btn compact" onClick={startNewDeposit}>
-          New
-        </button>
+        {!isReadOnly && (
+          <button type="button" className="secondary-btn compact" onClick={startNewDeposit}>
+            New
+          </button>
+        )}
       </div>
 
       {isMobile ? (
@@ -258,7 +267,7 @@ export default function DepositsView({
               </button>
             </div>
           )}
-          {isMobile && (
+          {isMobile && !isReadOnly && (
             <div className="mobile-detail-actions">
               <button type="button" className="secondary-btn compact" onClick={() => startCloning(selectedDeposit)}>
                 Clone
@@ -269,6 +278,11 @@ export default function DepositsView({
               <button type="button" className="secondary-btn compact" onClick={startArchive}>
                 Archive
               </button>
+              {canDeletePortfolio && (
+                <button type="button" className="secondary-btn compact" onClick={startDelete}>
+                  Delete
+                </button>
+              )}
             </div>
           )}
           <div className="section-head">
@@ -276,19 +290,26 @@ export default function DepositsView({
               <h2>{selectedDeposit.bankName}</h2>
               <p>{selectedDeposit.accountNumber}</p>
             </div>
-            <div className={isMobile ? 'hero-actions mobile-hidden' : 'hero-actions'}>
-              <button type="button" className="secondary-btn compact" onClick={() => startCloning(selectedDeposit)}>
-                Clone
-              </button>
-              <button type="button" className="secondary-btn compact" onClick={() => startEditing(selectedDeposit)}>
-                Edit
-              </button>
-              <button type="button" className="secondary-btn compact" onClick={startArchive}>
-                Archive
-              </button>
-            </div>
+            {!isReadOnly && (
+              <div className={isMobile ? 'hero-actions mobile-hidden' : 'hero-actions'}>
+                <button type="button" className="secondary-btn compact" onClick={() => startCloning(selectedDeposit)}>
+                  Clone
+                </button>
+                <button type="button" className="secondary-btn compact" onClick={() => startEditing(selectedDeposit)}>
+                  Edit
+                </button>
+                <button type="button" className="secondary-btn compact" onClick={startArchive}>
+                  Archive
+                </button>
+                {canDeletePortfolio && (
+                  <button type="button" className="secondary-btn compact" onClick={startDelete}>
+                    Delete
+                  </button>
+                )}
+              </div>
+            )}
           </div>
-          {archiveTargetId === selectedDeposit.id && (
+          {!isReadOnly && archiveTargetId === selectedDeposit.id && (
             <div className="inline-action-card">
               <div>
                 <strong>Archive this investment?</strong>
@@ -303,6 +324,24 @@ export default function DepositsView({
                 </button>
                 <button type="button" className="primary-btn compact-btn" onClick={confirmArchive} disabled={isArchiving}>
                   {isArchiving ? 'Archiving...' : 'Confirm archive'}
+                </button>
+              </div>
+            </div>
+          )}
+          {!isReadOnly && canDeletePortfolio && deleteTargetId === selectedDeposit.id && (
+            <div className="inline-action-card">
+              <div>
+                <strong>Delete this investment permanently?</strong>
+                <p>
+                  This is an admin-only hard delete and cannot be undone.
+                </p>
+              </div>
+              <div className="inline-action-buttons">
+                <button type="button" className="secondary-btn compact" onClick={cancelDelete} disabled={isDeleting}>
+                  Cancel
+                </button>
+                <button type="button" className="primary-btn compact-btn" onClick={confirmDelete} disabled={isDeleting}>
+                  {isDeleting ? 'Deleting...' : 'Confirm delete'}
                 </button>
               </div>
             </div>
@@ -384,7 +423,7 @@ export default function DepositsView({
                           {formatCurrency(selectedReinvestmentSummary.uninvestedAmount)}
                         </span>
                       </p>
-                      {selectedReinvestmentSummary.isRealized && selectedReinvestmentSummary.uninvestedAmount > 0 && (
+                      {!isReadOnly && selectedReinvestmentSummary.isRealized && selectedReinvestmentSummary.uninvestedAmount > 0 && (
                         <div className="schedule-actions">
                           <button type="button" className="secondary-btn compact" onClick={fillFromSelectedMaturity}>
                             Use as source
@@ -427,7 +466,7 @@ export default function DepositsView({
                         <h2>Interest</h2>
                         <p>Generated cash flow events for periodic-interest products.</p>
                       </div>
-                      {selectedInterestSummary.totalDueUnallocated > 0 && (
+                      {!isReadOnly && selectedInterestSummary.totalDueUnallocated > 0 && (
                         <div className="section-head-actions">
                           <button type="button" className="secondary-btn compact" onClick={fillFromAllAvailableInterest}>
                             Use all available interest
@@ -469,7 +508,7 @@ export default function DepositsView({
                             </p>
                             {event.externalTopUpAmount > 0 && <p>Added from other funds {formatCurrency(event.externalTopUpAmount)}</p>}
                           </div>
-                          {event.isDue && event.unallocatedAmount > 0 && (
+                          {!isReadOnly && event.isDue && event.unallocatedAmount > 0 && (
                             <div className="schedule-actions">
                               <button type="button" className="secondary-btn compact" onClick={() => applyCashFlowSource(event)}>
                                 Use as source
@@ -560,7 +599,7 @@ export default function DepositsView({
                         {formatCurrency(selectedReinvestmentSummary.uninvestedAmount)}
                       </span>
                     </p>
-                    {selectedReinvestmentSummary.isRealized && selectedReinvestmentSummary.uninvestedAmount > 0 && (
+                    {!isReadOnly && selectedReinvestmentSummary.isRealized && selectedReinvestmentSummary.uninvestedAmount > 0 && (
                       <div className="schedule-actions">
                         <button type="button" className="secondary-btn compact" onClick={fillFromSelectedMaturity}>
                           Use as source
@@ -598,7 +637,7 @@ export default function DepositsView({
                       <h2>Interest</h2>
                       <p>Generated cash flow events for periodic-interest products.</p>
                     </div>
-                    {selectedInterestSummary.totalDueUnallocated > 0 && (
+                    {!isReadOnly && selectedInterestSummary.totalDueUnallocated > 0 && (
                       <div className="section-head-actions">
                         <button type="button" className="secondary-btn compact" onClick={fillFromAllAvailableInterest}>
                           Use all available interest
@@ -640,7 +679,7 @@ export default function DepositsView({
                           </p>
                           {event.externalTopUpAmount > 0 && <p>Added from other funds {formatCurrency(event.externalTopUpAmount)}</p>}
                         </div>
-                        {event.isDue && event.unallocatedAmount > 0 && (
+                        {!isReadOnly && event.isDue && event.unallocatedAmount > 0 && (
                           <div className="schedule-actions">
                             <button type="button" className="secondary-btn compact" onClick={() => applyCashFlowSource(event)}>
                               Use as source

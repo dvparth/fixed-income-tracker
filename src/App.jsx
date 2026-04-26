@@ -1,16 +1,58 @@
 import { startTransition, useDeferredValue, useEffect, useMemo, useState } from 'react'
 import './App.css'
 import AdminView from './features/admin/AdminView.jsx'
+import AuthView from './features/auth/AuthView.jsx'
 import DepositsView from './features/deposits/DepositsView.jsx'
 import DepositEditorView from './features/editor/DepositEditorView.jsx'
 import MastersView from './features/masters/MastersView.jsx'
+import PortfolioAccessPanel from './features/sharing/PortfolioAccessPanel.jsx'
 import { downloadInvestmentsWorkbook } from './features/admin/exportWorkbook.js'
 import { TODAY, addDays, computeTdsAmount, computeTdsPercent, deriveTenureParts, emptyForm, formatAllocationsText, formatCurrency, formatDate, formatTenure, generateInterestEvents, getCurrentFinancialYearRange, getDateSortValue, getEffectivePayoutMode, getFinancialYearLabelFromDate, getFinancialYearRangeFromLabel, getFundingAllocations, getHolderSearchTokens, getMaturitySourceEventId, getPayoutModeLabel, getPostTdsAmount, hydrateDeposit, needsPeriodicPayoutSetup, normalizeDeposit, parseAllocationEntries, requestJson, toYmd } from './features/deposits/depositModel.js'
 import { buildOwnerAliasLookup, emptyMasterData, normalizeMasterData } from '../shared/masterData.js'
 
 const ADD_NEW_MASTER_VALUE = '__add_new_master__'
+const THEME_STORAGE_KEY = 'yieldflow.theme'
+const createEmptySessionState = () => ({
+  authenticated: false,
+  user: null,
+  accessiblePortfolios: [],
+  activePortfolioOwnerId: '',
+})
+
+const normalizeSessionState = (sessionResponse = {}) => ({
+  authenticated: Boolean(sessionResponse.authenticated),
+  user: sessionResponse.user || null,
+  accessiblePortfolios: Array.isArray(sessionResponse.accessiblePortfolios)
+    ? sessionResponse.accessiblePortfolios
+    : [],
+  activePortfolioOwnerId: String(
+    sessionResponse.activePortfolioOwnerId || sessionResponse.user?.id || '',
+  ),
+})
+
+const buildOwnerScopedPath = (path, ownerUserId) => {
+  if (!ownerUserId) {
+    return path
+  }
+
+  const separator = path.includes('?') ? '&' : '?'
+  return `${path}${separator}ownerUserId=${encodeURIComponent(ownerUserId)}`
+}
 
 function App() {
+  const [sessionState, setSessionState] = useState(createEmptySessionState)
+  const [isAuthenticating, setIsAuthenticating] = useState(false)
+  const [authError, setAuthError] = useState('')
+  const [themeClass, setThemeClass] = useState(
+    () => globalThis.localStorage?.getItem(THEME_STORAGE_KEY) || 'theme-midnight-navy',
+  )
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [activePortfolioOwnerId, setActivePortfolioOwnerId] = useState('')
+  const [sharesState, setSharesState] = useState({ ownerShares: [], sharedWithMe: [] })
+  const [shareEmail, setShareEmail] = useState('')
+  const [isSubmittingShare, setIsSubmittingShare] = useState(false)
+  const [shareFeedback, setShareFeedback] = useState(null)
+  const [isDownloadingWorkbook, setIsDownloadingWorkbook] = useState(false)
   const [deposits, setDeposits] = useState([])
   const [masterData, setMasterData] = useState(emptyMasterData)
   const [activeTab, setActiveTab] = useState('dashboard')
@@ -37,6 +79,8 @@ function App() {
   const [fundingAmountDraft, setFundingAmountDraft] = useState('')
   const [archiveTargetId, setArchiveTargetId] = useState(null)
   const [isArchiving, setIsArchiving] = useState(false)
+  const [deleteTargetId, setDeleteTargetId] = useState(null)
+  const [isDeleting, setIsDeleting] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [interestFocusMode, setInterestFocusMode] = useState('all')
@@ -63,32 +107,31 @@ function App() {
   }, [deposits])
 
   useEffect(() => {
-    const loadDeposits = async () => {
+    const loadSession = async () => {
       try {
         setIsLoading(true)
         setLoadError('')
-        const [depositsData, masterDataResponse] = await Promise.all([
-          requestJson('/api/deposits'),
-          requestJson('/api/master-data').catch(() => emptyMasterData),
-        ])
-        const nextDeposits = depositsData.map(hydrateDeposit)
-        setDeposits(nextDeposits)
-        setMasterData(normalizeMasterData(masterDataResponse))
-        setSelectedId((current) =>
-          current && nextDeposits.some((deposit) => deposit.id === current)
-            ? current
-            : nextDeposits[0]?.id ?? null,
-        )
+        const sessionResponse = normalizeSessionState(await requestJson('/api/auth/session'))
+
+        if (!sessionResponse.authenticated) {
+          setSessionState(createEmptySessionState())
+          setActivePortfolioOwnerId('')
+          setDeposits([])
+          setMasterData(emptyMasterData)
+          setSelectedId(null)
+          return
+        }
+
+        setSessionState(sessionResponse)
+        setActivePortfolioOwnerId(sessionResponse.activePortfolioOwnerId)
       } catch (error) {
-        setDeposits([])
-        setSelectedId(null)
         setLoadError(error.message)
       } finally {
         setIsLoading(false)
       }
     }
 
-    loadDeposits()
+    loadSession()
   }, [])
 
   useEffect(() => {
@@ -105,8 +148,112 @@ function App() {
     return () => window.removeEventListener('resize', handleResize)
   }, [])
 
+  useEffect(() => {
+    globalThis.localStorage?.setItem(THEME_STORAGE_KEY, themeClass)
+  }, [themeClass])
+
+  useEffect(() => {
+    if (!sessionState.authenticated || !activePortfolioOwnerId) {
+      return undefined
+    }
+
+    let isMounted = true
+
+    const loadPortfolioData = async () => {
+      try {
+        setIsLoading(true)
+        setLoadError('')
+        const [depositsData, masterDataResponse] = await Promise.all([
+          requestJson(buildOwnerScopedPath('/api/deposits', activePortfolioOwnerId)),
+          requestJson(buildOwnerScopedPath('/api/master-data', activePortfolioOwnerId)).catch(
+            () => emptyMasterData,
+          ),
+        ])
+
+        if (!isMounted) {
+          return
+        }
+
+        const nextDeposits = depositsData.map(hydrateDeposit)
+        setDeposits(nextDeposits)
+        setMasterData(normalizeMasterData(masterDataResponse))
+        setSelectedId((current) =>
+          current && nextDeposits.some((deposit) => deposit.id === current)
+            ? current
+            : nextDeposits[0]?.id ?? null,
+        )
+      } catch (error) {
+        if (!isMounted) {
+          return
+        }
+
+        setDeposits([])
+        setMasterData(emptyMasterData)
+        setSelectedId(null)
+        setLoadError(error.message)
+      } finally {
+        if (isMounted) {
+          setIsLoading(false)
+        }
+      }
+    }
+
+    loadPortfolioData()
+
+    return () => {
+      isMounted = false
+    }
+  }, [activePortfolioOwnerId, sessionState.authenticated])
+
+  useEffect(() => {
+    if (!sessionState.authenticated) {
+      return undefined
+    }
+
+    if (sessionState.user?.systemRole === 'admin') {
+      return undefined
+    }
+
+    let isMounted = true
+
+    const loadShares = async () => {
+      try {
+        const nextShares = await requestJson('/api/shares')
+        if (isMounted) {
+          setSharesState(nextShares)
+        }
+      } catch (error) {
+        if (isMounted) {
+          setShareFeedback({
+            type: 'error',
+            message: error.message,
+          })
+        }
+      }
+    }
+
+    loadShares()
+
+    return () => {
+      isMounted = false
+    }
+  }, [sessionState.authenticated, sessionState.user?.systemRole])
+
   const deferredSearch = useDeferredValue(searchText)
   const ownerAliasLookup = useMemo(() => buildOwnerAliasLookup(masterData), [masterData])
+  const activePortfolio =
+    sessionState.accessiblePortfolios.find(
+      (portfolio) => portfolio.ownerUserId === activePortfolioOwnerId,
+    ) ?? null
+  const isReadOnlyPortfolio = activePortfolio?.accessType === 'guest'
+  const isAdminUser = sessionState.user?.systemRole === 'admin'
+  const canEditPortfolio = sessionState.authenticated && (isAdminUser || !isReadOnlyPortfolio)
+  const canUseAdmin = isAdminUser
+  const canDeletePortfolio = isAdminUser
+  const activePortfolioLabel =
+    activePortfolio?.accessType === 'guest' || activePortfolio?.accessType === 'admin'
+      ? `${activePortfolio.ownerDisplayName}'s portfolio`
+      : 'your portfolio'
 
   const cashFlowEvents = useMemo(() => {
     const events = []
@@ -508,9 +655,14 @@ function App() {
     setSelectedFundingEventId('')
     setFundingAmountDraft('')
     setArchiveTargetId(null)
+    setDeleteTargetId(null)
   }
 
   const startNewDeposit = () => {
+    if (!canEditPortfolio) {
+      return
+    }
+
     setEditorReturnTab(activeTab)
     setEditorReturnDepositsScreen(mobileDepositsScreen)
     setActiveTab('editor')
@@ -522,12 +674,16 @@ function App() {
   }
 
   const saveMasterData = async (nextMasterData) => {
+    if (!canEditPortfolio) {
+      return
+    }
+
     try {
       setIsSavingMasters(true)
       setMastersFeedback(null)
       setLoadError('')
       const savedMasterData = normalizeMasterData(
-        await requestJson('/api/master-data', {
+        await requestJson(buildOwnerScopedPath('/api/master-data', activePortfolioOwnerId), {
           method: 'PUT',
           body: JSON.stringify(nextMasterData),
         }),
@@ -552,6 +708,10 @@ function App() {
   }
 
   const startEditing = (deposit) => {
+    if (!canEditPortfolio) {
+      return
+    }
+
     setEditorReturnTab(activeTab)
     setEditorReturnDepositsScreen(mobileDepositsScreen)
     setActiveTab('editor')
@@ -594,6 +754,10 @@ function App() {
   }
 
   const startCloning = (deposit) => {
+    if (!canEditPortfolio) {
+      return
+    }
+
     setEditorReturnTab(activeTab)
     setEditorReturnDepositsScreen(mobileDepositsScreen)
     setActiveTab('editor')
@@ -685,6 +849,121 @@ function App() {
     setActiveTab('deposits')
   }
 
+  const refreshSessionState = async () => {
+    const nextSession = normalizeSessionState(await requestJson('/api/auth/session'))
+    if (!nextSession.authenticated) {
+      setSessionState(createEmptySessionState())
+      setActivePortfolioOwnerId('')
+      return null
+    }
+
+    setSessionState(nextSession)
+    setActivePortfolioOwnerId((current) => {
+      if (
+        current &&
+        nextSession.accessiblePortfolios.some((portfolio) => portfolio.ownerUserId === current)
+      ) {
+        return current
+      }
+
+      return nextSession.activePortfolioOwnerId || nextSession.user?.id || ''
+    })
+    return nextSession
+  }
+
+  const handleGoogleAuthenticate = async (credential) => {
+    try {
+      setIsAuthenticating(true)
+      setAuthError('')
+      setLoadError('')
+      const nextSession = normalizeSessionState(await requestJson('/api/auth/google', {
+        method: 'POST',
+        body: JSON.stringify({ credential }),
+      }))
+      setSessionState(nextSession)
+      setActivePortfolioOwnerId(nextSession.activePortfolioOwnerId)
+      setShareFeedback(null)
+      setIsSettingsOpen(false)
+    } catch (error) {
+      setAuthError(error.message)
+    } finally {
+      setIsAuthenticating(false)
+    }
+  }
+
+  const handleLogout = async () => {
+    try {
+      await requestJson('/api/auth/logout', { method: 'POST' })
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setSessionState(createEmptySessionState())
+      setActivePortfolioOwnerId('')
+      setDeposits([])
+      setMasterData(emptyMasterData)
+      setSelectedId(null)
+      setSharesState({ ownerShares: [], sharedWithMe: [] })
+      setShareEmail('')
+      setShareFeedback(null)
+      setAuthError('')
+      setActiveTab('dashboard')
+      setIsSettingsOpen(false)
+    }
+  }
+
+  const handleCreateShare = async (event) => {
+    event.preventDefault()
+
+    try {
+      setIsSubmittingShare(true)
+      setShareFeedback(null)
+      const createdShare = await requestJson('/api/shares', {
+        method: 'POST',
+        body: JSON.stringify({ guestEmail: shareEmail }),
+      })
+      setSharesState((current) => ({
+        ...current,
+        ownerShares: [...current.ownerShares.filter((share) => share.id !== createdShare.id), createdShare],
+      }))
+      setShareEmail('')
+      setShareFeedback({
+        type: 'success',
+        message: 'Read-only access granted.',
+      })
+      await refreshSessionState()
+    } catch (error) {
+      setShareFeedback({
+        type: 'error',
+        message: error.message,
+      })
+    } finally {
+      setIsSubmittingShare(false)
+    }
+  }
+
+  const handleDeleteShare = async (shareId) => {
+    try {
+      setShareFeedback(null)
+      await requestJson(`/api/shares/${shareId}`, {
+        method: 'DELETE',
+      })
+      setSharesState((current) => ({
+        ...current,
+        ownerShares: current.ownerShares.filter((share) => share.id !== shareId),
+      }))
+      setShareFeedback({
+        type: 'success',
+        message: 'Access removed.',
+      })
+      await refreshSessionState()
+    } catch (error) {
+      setShareFeedback({
+        type: 'error',
+        message: error.message,
+      })
+    }
+  }
+
   const handleFormChange = (event) => {
     const { name, value } = event.target
     const nextFormValues = { ...formValues, [name]: value }
@@ -716,6 +995,10 @@ function App() {
   }
 
   const openMastersForField = (fieldName) => {
+    if (!canEditPortfolio) {
+      return
+    }
+
     const nextIntent =
       fieldName === 'holderName' || fieldName === 'fundingSource'
         ? { section: 'owners' }
@@ -815,6 +1098,10 @@ function App() {
   const handleSave = async (event) => {
     event.preventDefault()
 
+    if (!canEditPortfolio) {
+      return
+    }
+
     const effectiveFormValues =
       formValues.instrumentType === 'SCSS' && formValues.payoutMode !== 'quarterly-fy'
         ? { ...formValues, payoutMode: 'quarterly-fy' }
@@ -880,11 +1167,11 @@ function App() {
       setLoadError('')
       const savedDeposit = hydrateDeposit(
         editingId
-          ? await requestJson(`/api/deposits/${editingId}`, {
+          ? await requestJson(buildOwnerScopedPath(`/api/deposits/${editingId}`, activePortfolioOwnerId), {
               method: 'PUT',
               body: JSON.stringify(normalized),
             })
-          : await requestJson('/api/deposits', {
+          : await requestJson(buildOwnerScopedPath('/api/deposits', activePortfolioOwnerId), {
               method: 'POST',
               body: JSON.stringify(normalized),
             }),
@@ -908,6 +1195,10 @@ function App() {
   }
 
   const applyCashFlowSource = (cashFlowEvent) => {
+    if (!canEditPortfolio) {
+      return
+    }
+
     setEditorReturnTab('deposits')
     setEditorReturnDepositsScreen('detail')
     setEditingId(null)
@@ -932,10 +1223,15 @@ function App() {
   }
 
   const startArchive = () => {
+    if (!canEditPortfolio) {
+      return
+    }
+
     if (!selectedDeposit) {
       return
     }
 
+    setDeleteTargetId(null)
     setArchiveTargetId(selectedDeposit.id)
   }
 
@@ -943,7 +1239,24 @@ function App() {
     setArchiveTargetId(null)
   }
 
+  const startDelete = () => {
+    if (!canDeletePortfolio || !selectedDeposit) {
+      return
+    }
+
+    setArchiveTargetId(null)
+    setDeleteTargetId(selectedDeposit.id)
+  }
+
+  const cancelDelete = () => {
+    setDeleteTargetId(null)
+  }
+
   const confirmArchive = async () => {
+    if (!canEditPortfolio) {
+      return
+    }
+
     if (!selectedDeposit || archiveTargetId !== selectedDeposit.id || isArchiving) {
       return
     }
@@ -952,9 +1265,12 @@ function App() {
       setIsArchiving(true)
       setLoadError('')
       const archivedDeposit = hydrateDeposit(
-        await requestJson(`/api/deposits/${selectedDeposit.id}/archive`, {
+        await requestJson(
+          buildOwnerScopedPath(`/api/deposits/${selectedDeposit.id}/archive`, activePortfolioOwnerId),
+          {
           method: 'POST',
-        }),
+          },
+        ),
       )
 
       startTransition(() => {
@@ -978,7 +1294,51 @@ function App() {
     }
   }
 
+  const confirmDelete = async () => {
+    if (!canDeletePortfolio) {
+      return
+    }
+
+    if (!selectedDeposit || deleteTargetId !== selectedDeposit.id || isDeleting) {
+      return
+    }
+
+    try {
+      setIsDeleting(true)
+      setLoadError('')
+      await requestJson(
+        buildOwnerScopedPath(`/api/deposits/${selectedDeposit.id}`, activePortfolioOwnerId),
+        {
+          method: 'DELETE',
+        },
+      )
+
+      startTransition(() => {
+        setDeposits((current) =>
+          current.filter((deposit) => deposit.id !== selectedDeposit.id),
+        )
+      })
+
+      const remainingDeposits = activeDeposits.filter((deposit) => deposit.id !== selectedDeposit.id)
+      setSelectedId(remainingDeposits[0]?.id ?? null)
+      setActiveTab(remainingDeposits.length > 0 ? 'deposits' : 'dashboard')
+      setMobileDepositsScreen('list')
+      if (editingId === selectedDeposit.id) {
+        resetForm()
+      }
+      setDeleteTargetId(null)
+    } catch (error) {
+      setLoadError(error.message)
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
   const fillFromSelectedMaturity = () => {
+    if (!canEditPortfolio) {
+      return
+    }
+
     if (!selectedDeposit || !selectedReinvestmentSummary?.isRealized) {
       return
     }
@@ -1010,6 +1370,10 @@ function App() {
   }
 
   const fillFromAllAvailableInterest = () => {
+    if (!canEditPortfolio) {
+      return
+    }
+
     if (!selectedDeposit) {
       return
     }
@@ -1164,19 +1528,23 @@ function App() {
     }
   }
 
-  const isMobileEditorScreen = isMobile && activeTab === 'editor'
+  const visibleActiveTab =
+    !canEditPortfolio && ['editor', 'masters', 'admin'].includes(activeTab)
+      ? 'dashboard'
+      : activeTab
+  const isMobileEditorScreen = isMobile && visibleActiveTab === 'editor'
   const mobileEditorTitle = editingId ? 'Edit deposit' : 'Add deposit'
   const mobileMastersTitle = 'Masters'
   const mobileAdminTitle = 'Admin'
   const hasActiveDepositFilters = searchScope !== 'all' || searchText.trim() !== '' || !showClosed
   const mobileCompactHeaderTitle =
-    activeTab === 'dashboard'
+    visibleActiveTab === 'dashboard'
       ? 'Dashboard'
-      : activeTab === 'deposits'
+      : visibleActiveTab === 'deposits'
         ? 'Deposits'
-        : activeTab === 'masters'
+        : visibleActiveTab === 'masters'
           ? mobileMastersTitle
-          : activeTab === 'admin'
+          : visibleActiveTab === 'admin'
             ? mobileAdminTitle
             : mobileEditorTitle
   const mobileFilterBadges = [
@@ -1194,7 +1562,7 @@ function App() {
   ].filter(Boolean)
   const showAppHeader = !isMobileEditorScreen
   const showFullHeroCard = false
-  const showHeroStrip = activeTab === 'dashboard' && !isMobileEditorScreen
+  const showHeroStrip = visibleActiveTab === 'dashboard' && !isMobileEditorScreen
   const helpCopy = {
     'active-principal': 'This is the total amount still invested in open deposits.',
     'interest-realised': 'This is the interest already earned in the selected financial year.',
@@ -1236,19 +1604,61 @@ function App() {
   )
 
   const openAdmin = () => {
+    if (!canUseAdmin) {
+      return
+    }
+
     setActiveTab('admin')
     setIsMobileNavOpen(false)
   }
 
-  const handleDownloadWorkbook = () => {
-    downloadInvestmentsWorkbook({
-      deposits,
-      allocationMap,
-    })
+  const handleDownloadWorkbook = async () => {
+    if (!canUseAdmin) {
+      return
+    }
+
+    try {
+      setIsDownloadingWorkbook(true)
+      const exportResponse = await requestJson(
+        buildOwnerScopedPath('/api/admin/export-data', activePortfolioOwnerId),
+      )
+      const exportDeposits = (exportResponse.deposits || []).map(hydrateDeposit)
+      downloadInvestmentsWorkbook({
+        deposits: exportDeposits,
+      })
+    } catch (error) {
+      setLoadError(error.message)
+    } finally {
+      setIsDownloadingWorkbook(false)
+    }
+  }
+
+  const desktopTabs = [
+    ['dashboard', 'Dashboard'],
+    ['deposits', 'Deposits'],
+    ...(canEditPortfolio ? [['editor', editingId ? 'Edit' : 'Add'], ['masters', 'Masters']] : []),
+    ...(canUseAdmin ? [['admin', 'Admin']] : []),
+  ]
+
+  const mobileTabs = [
+    ['dashboard', 'Dashboard'],
+    ['deposits', 'Deposits'],
+    ...(canEditPortfolio ? [['editor', editingId ? 'Edit' : 'Add']] : []),
+  ]
+
+  if (!sessionState.authenticated) {
+    return (
+      <AuthView
+        onAuthenticate={handleGoogleAuthenticate}
+        error={authError}
+        isAuthenticating={isAuthenticating}
+        themeClass={themeClass}
+      />
+    )
   }
 
   return (
-    <div className="shell theme-midnight-navy">
+    <div className={`shell ${themeClass}`}>
       {showAppHeader && (
         <header className="app-topbar">
           <div className="app-topbar-copy">
@@ -1258,31 +1668,136 @@ function App() {
           <div className="app-topbar-actions">
             <button
               type="button"
-              className={activeTab === 'admin' ? 'secondary-btn compact active-topbar-btn' : 'secondary-btn compact'}
-              onClick={openAdmin}
+              className={isSettingsOpen ? 'icon-btn active' : 'icon-btn'}
+              onClick={() => setIsSettingsOpen((current) => !current)}
+              aria-label="Open settings"
             >
-              Admin
-            </button>
-            <button
-              type="button"
-              className={activeTab === 'masters' ? 'icon-btn active' : 'icon-btn'}
-              onClick={() => {
-                setActiveTab('masters')
-                setIsMobileNavOpen(false)
-              }}
-              aria-label="Open masters"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M12 8.75a3.25 3.25 0 1 0 0 6.5a3.25 3.25 0 0 0 0-6.5Zm8.25 3.25l-1.54-.53a6.72 6.72 0 0 0-.52-1.24l.73-1.46a.9.9 0 0 0-.17-1.04l-1.48-1.48a.9.9 0 0 0-1.04-.17l-1.46.73c-.4-.21-.82-.38-1.24-.52l-.53-1.54a.9.9 0 0 0-.85-.6h-2.1a.9.9 0 0 0-.85.6l-.53 1.54c-.42.14-.84.31-1.24.52l-1.46-.73a.9.9 0 0 0-1.04.17L5.25 7.73a.9.9 0 0 0-.17 1.04l.73 1.46c-.21.4-.38.82-.52 1.24l-1.54.53a.9.9 0 0 0-.6.85v2.1c0 .39.25.73.6.85l1.54.53c.14.42.31.84.52 1.24l-.73 1.46a.9.9 0 0 0 .17 1.04l1.48 1.48c.28.28.7.35 1.04.17l1.46-.73c.4.21.82.38 1.24.52l.53 1.54c.12.35.46.6.85.6h2.1c.39 0 .73-.25.85-.6l.53-1.54c.42-.14.84-.31 1.24-.52l1.46.73c.34.18.76.11 1.04-.17l1.48-1.48a.9.9 0 0 0 .17-1.04l-.73-1.46c.21-.4.38-.82.52-1.24l1.54-.53c.35-.12.6-.46.6-.85v-2.1a.9.9 0 0 0-.6-.85Z" fill="currentColor" />
-              </svg>
+              {sessionState.user?.photoUrl ? (
+                <img className="topbar-avatar" src={sessionState.user.photoUrl} alt={sessionState.user.displayName} />
+              ) : (
+                <div className="topbar-avatar fallback-avatar" aria-hidden="true">
+                  {String(sessionState.user?.displayName || sessionState.user?.email || 'Y')
+                    .trim()
+                    .slice(0, 1)
+                    .toUpperCase()}
+                </div>
+              )}
             </button>
           </div>
         </header>
       )}
 
+      {isSettingsOpen && (
+        <section className="settings-panel panel">
+          <div className="section-head">
+            <div>
+              <h2>Settings</h2>
+              <p>Manage portfolio, theme, and access preferences.</p>
+            </div>
+            <button
+              type="button"
+              className="secondary-btn compact ghost-btn"
+              onClick={() => setIsSettingsOpen(false)}
+            >
+              Close
+            </button>
+          </div>
+
+          <div className="settings-profile">
+            {sessionState.user?.photoUrl ? (
+              <img className="settings-avatar" src={sessionState.user.photoUrl} alt={sessionState.user.displayName} />
+            ) : (
+              <div className="settings-avatar fallback-avatar" aria-hidden="true">
+                {String(sessionState.user?.displayName || sessionState.user?.email || 'Y')
+                  .trim()
+                  .slice(0, 1)
+                  .toUpperCase()}
+              </div>
+            )}
+            <div className="settings-profile-copy">
+              <strong>{sessionState.user?.displayName}</strong>
+              <span>{sessionState.user?.email}</span>
+            </div>
+          </div>
+
+          <div className="settings-grid">
+            <div className="field settings-static-field">
+              <span>Role</span>
+              <strong>{isAdminUser ? 'Admin' : 'User'}</strong>
+            </div>
+
+            <label className="field">
+              <span>Viewing portfolio</span>
+              <select
+                value={activePortfolioOwnerId}
+                onChange={(event) => setActivePortfolioOwnerId(event.target.value)}
+              >
+                {sessionState.accessiblePortfolios.map((portfolio) => (
+                  <option key={portfolio.ownerUserId} value={portfolio.ownerUserId}>
+                    {portfolio.accessType === 'owner'
+                      ? 'My portfolio'
+                      : `${portfolio.ownerDisplayName}${portfolio.accessType === 'admin' ? '' : ' (Shared)'}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field">
+              <span>Theme</span>
+              <select value={themeClass} onChange={(event) => setThemeClass(event.target.value)}>
+                <option value="theme-midnight-navy">Midnight Navy</option>
+                <option value="theme-cream">Cream</option>
+              </select>
+            </label>
+          </div>
+
+          {!isAdminUser && (
+            <PortfolioAccessPanel
+              isOwnerPortfolio={!isReadOnlyPortfolio}
+              activePortfolioLabel={activePortfolioLabel}
+              shareEmail={shareEmail}
+              setShareEmail={setShareEmail}
+              onCreateShare={handleCreateShare}
+              onDeleteShare={handleDeleteShare}
+              ownedShares={sharesState.ownerShares}
+              sharedWithMe={sharesState.sharedWithMe}
+              isSubmittingShare={isSubmittingShare}
+              shareFeedback={shareFeedback}
+            />
+          )}
+
+          <div className="settings-actions">
+            {canUseAdmin && (
+              <button type="button" className="secondary-btn compact" onClick={openAdmin}>
+                Open Admin
+              </button>
+            )}
+            {canEditPortfolio && (
+              <button
+                type="button"
+                className="secondary-btn compact"
+                onClick={() => {
+                  setActiveTab('masters')
+                  setIsSettingsOpen(false)
+                }}
+              >
+                Open Masters
+              </button>
+            )}
+            <button type="button" className="secondary-btn compact" onClick={handleLogout}>
+              Logout
+            </button>
+          </div>
+        </section>
+      )}
+
       {showHeroStrip && (
         <section className="mobile-hero-strip">
-          <p>Track maturity, interest payouts, and reinvestment in one place.</p>
+          <p>
+            {isReadOnlyPortfolio
+              ? `Viewing ${activePortfolioLabel} in read-only mode.`
+              : 'Track maturity, interest payouts, and reinvestment in one place.'}
+          </p>
         </section>
       )}
 
@@ -1297,21 +1812,31 @@ function App() {
             </p>
           </div>
           <div className="hero-actions">
-            <button type="button" className="primary-btn" onClick={startNewDeposit}>
-              Add deposit
-            </button>
-            {selectedReinvestmentSummary?.isRealized && selectedReinvestmentSummary.uninvestedAmount > 0 && (
+            {canEditPortfolio && (
+              <button type="button" className="primary-btn" onClick={startNewDeposit}>
+                Add deposit
+              </button>
+            )}
+            {canEditPortfolio &&
+              selectedReinvestmentSummary?.isRealized &&
+              selectedReinvestmentSummary.uninvestedAmount > 0 && (
               <button type="button" className="secondary-btn" onClick={fillFromSelectedMaturity}>
                 Use maturity source
               </button>
-            )}
+              )}
           </div>
         </header>
       )}
 
       {(isLoading || loadError) && (
         <section className={loadError ? 'status-banner error' : 'status-banner'}>
-          {isLoading ? 'Loading deposits from MongoDB...' : loadError}
+          {isLoading ? 'Loading portfolio from MongoDB...' : loadError}
+        </section>
+      )}
+
+      {!isLoading && isReadOnlyPortfolio && (
+        <section className="status-banner warning">
+          Viewing {activePortfolioLabel} as a guest. Changes, deletes, and admin exports are disabled.
         </section>
       )}
 
@@ -1328,17 +1853,11 @@ function App() {
           className="tab-bar"
           aria-label="Sections"
         >
-          {[
-            ['dashboard', 'Dashboard'],
-            ['deposits', 'Deposits'],
-            ['editor', editingId ? 'Edit' : 'Add'],
-            ['masters', 'Masters'],
-            ['admin', 'Admin'],
-          ].map(([value, label]) => (
+          {desktopTabs.map(([value, label]) => (
             <button
               key={value}
               type="button"
-              className={activeTab === value ? 'tab active' : 'tab'}
+              className={visibleActiveTab === value ? 'tab active' : 'tab'}
               onClick={() => {
                 setActiveTab(value)
                 if (value === 'deposits') {
@@ -1355,15 +1874,11 @@ function App() {
 
       {!isMobileEditorScreen && isMobile && (
         <nav className="bottom-nav" aria-label="Primary navigation">
-          {[
-            ['dashboard', 'Dashboard'],
-            ['deposits', 'Deposits'],
-            ['editor', editingId ? 'Edit' : 'Add'],
-          ].map(([value, label]) => (
+          {mobileTabs.map(([value, label]) => (
             <button
               key={value}
               type="button"
-              className={activeTab === value ? 'bottom-nav-item active' : 'bottom-nav-item'}
+              className={visibleActiveTab === value ? 'bottom-nav-item active' : 'bottom-nav-item'}
               onClick={() => {
                 setActiveTab(value)
                 if (value === 'deposits') {
@@ -1372,7 +1887,7 @@ function App() {
               }}
             >
               <span className="bottom-nav-icon" aria-hidden="true">
-                {value === 'dashboard' ? '◫' : value === 'deposits' ? '▤' : '＋'}
+                {value === 'dashboard' ? 'O' : value === 'deposits' ? '#' : '+'}
               </span>
               <span>{label}</span>
             </button>
@@ -1396,7 +1911,7 @@ function App() {
         </div>
       )}
 
-      {activeTab === 'dashboard' && (
+      {visibleActiveTab === 'dashboard' && (
         <section className="dashboard-layout">
           <div className="stack">
             <article className="panel">
@@ -1647,9 +2162,10 @@ function App() {
         </section>
       )}
 
-      {activeTab === 'deposits' && (
+      {visibleActiveTab === 'deposits' && (
         <DepositsView
           isMobile={isMobile}
+          isReadOnly={isReadOnlyPortfolio}
           mobileDepositsScreen={mobileDepositsScreen}
           isMobileFiltersOpen={isMobileFiltersOpen}
           setIsMobileFiltersOpen={setIsMobileFiltersOpen}
@@ -1670,6 +2186,8 @@ function App() {
           selectedInterestSummary={selectedInterestSummary}
           archiveTargetId={archiveTargetId}
           isArchiving={isArchiving}
+          deleteTargetId={deleteTargetId}
+          isDeleting={isDeleting}
           startNewDeposit={startNewDeposit}
           openDepositDetail={openDepositDetail}
           setMobileDepositsScreen={setMobileDepositsScreen}
@@ -1678,6 +2196,9 @@ function App() {
           startArchive={startArchive}
           cancelArchive={cancelArchive}
           confirmArchive={confirmArchive}
+          startDelete={startDelete}
+          cancelDelete={cancelDelete}
+          confirmDelete={confirmDelete}
           fillFromSelectedMaturity={fillFromSelectedMaturity}
           fillFromAllAvailableInterest={fillFromAllAvailableInterest}
           applyCashFlowSource={applyCashFlowSource}
@@ -1689,10 +2210,11 @@ function App() {
           formatDate={formatDate}
           formatTenure={formatTenure}
           todayTime={TODAY.getTime()}
+          canDeletePortfolio={canDeletePortfolio}
         />
       )}
 
-      {activeTab === 'editor' && (
+      {visibleActiveTab === 'editor' && (
         <DepositEditorView
           isMobileEditorScreen={isMobileEditorScreen}
           mobileEditorTitle={mobileEditorTitle}
@@ -1734,7 +2256,7 @@ function App() {
         />
       )}
 
-      {activeTab === 'masters' && (
+      {visibleActiveTab === 'masters' && (
         <MastersView
           key={`${mastersViewSeed}-${JSON.stringify(masterData)}`}
           isMobile={isMobile}
@@ -1748,13 +2270,16 @@ function App() {
             setMastersReturnTarget(null)
           }}
           showReturnToEditor={mastersReturnTarget === 'editor'}
+          isReadOnly={isReadOnlyPortfolio}
         />
       )}
 
-      {activeTab === 'admin' && (
+      {visibleActiveTab === 'admin' && canUseAdmin && (
         <AdminView
           totalInvestments={deposits.length}
           onDownloadWorkbook={handleDownloadWorkbook}
+          portfolioLabel={activePortfolioLabel}
+          isDownloadingWorkbook={isDownloadingWorkbook}
         />
       )}
     </div>

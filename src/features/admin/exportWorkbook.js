@@ -58,6 +58,20 @@ const downloadBlob = (filename, blob) => {
   URL.revokeObjectURL(url)
 }
 
+const buildAllocationMap = (deposits) => {
+  const map = new Map()
+
+  deposits.forEach((deposit) => {
+    getFundingAllocations(deposit).forEach((allocation) => {
+      const eventId = allocation.eventId
+      const current = map.get(eventId) ?? []
+      map.set(eventId, [...current, { deposit, amount: Number(allocation.amount || 0) }])
+    })
+  })
+
+  return map
+}
+
 const buildInvestmentExportRows = ({ deposits, allocationMap }) => {
   const header = [
     'Sr No',
@@ -215,7 +229,8 @@ const buildSummaryRows = (deposits) => {
   ]
 }
 
-export const downloadInvestmentsWorkbook = ({ deposits, allocationMap }) => {
+export const downloadInvestmentsWorkbook = ({ deposits }) => {
+  const allocationMap = buildAllocationMap(deposits)
   const workbookXml = `<?xml version="1.0"?>
 <?mso-application progid="Excel.Sheet"?>
 <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"

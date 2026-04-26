@@ -1,6 +1,8 @@
 export default function AdminView({
   totalInvestments,
   onDownloadWorkbook,
+  portfolioLabel,
+  isDownloadingWorkbook,
 }) {
   return (
     <section className="stack">
@@ -8,10 +10,18 @@ export default function AdminView({
         <div className="section-head">
           <div>
             <h2>Admin</h2>
-            <p>Download the full investment register across all financial years, including derived values.</p>
+            <p>
+              Download the investment register for {portfolioLabel}, including derived values and
+              funding lineage.
+            </p>
           </div>
-          <button type="button" className="primary-btn" onClick={onDownloadWorkbook}>
-            Download Excel
+          <button
+            type="button"
+            className="primary-btn"
+            onClick={onDownloadWorkbook}
+            disabled={isDownloadingWorkbook}
+          >
+            {isDownloadingWorkbook ? 'Preparing export...' : 'Download Excel'}
           </button>
         </div>
 
@@ -19,7 +29,7 @@ export default function AdminView({
           <div className="editor-summary-card">
             <span>Total investments</span>
             <strong>{totalInvestments}</strong>
-            <small>Includes all records, regardless of financial year.</small>
+            <small>Includes all records for this portfolio, regardless of financial year.</small>
           </div>
           <div className="editor-summary-card">
             <span>What is included</span>
