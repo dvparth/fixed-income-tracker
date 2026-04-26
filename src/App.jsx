@@ -2,10 +2,15 @@ import { startTransition, useDeferredValue, useEffect, useMemo, useState } from 
 import './App.css'
 import DepositsView from './features/deposits/DepositsView.jsx'
 import DepositEditorView from './features/editor/DepositEditorView.jsx'
-import { TODAY, addDays, emptyForm, formatAllocationsText, formatCurrency, formatDate, generateInterestEvents, getCurrentFinancialYearRange, getDateSortValue, getEffectivePayoutMode, getFinancialYearLabelFromDate, getFinancialYearRangeFromLabel, getFundingAllocations, getHolderSearchTokens, getMaturitySourceEventId, getPayoutModeLabel, getPostTdsAmount, hydrateDeposit, needsPeriodicPayoutSetup, normalizeDeposit, parseAllocationEntries, requestJson, sampleDeposits, toYmd } from './features/deposits/depositModel.js'
+import MastersView from './features/masters/MastersView.jsx'
+import { TODAY, addDays, computeTdsAmount, computeTdsPercent, deriveTenureParts, emptyForm, formatAllocationsText, formatCurrency, formatDate, formatTenure, generateInterestEvents, getCurrentFinancialYearRange, getDateSortValue, getEffectivePayoutMode, getFinancialYearLabelFromDate, getFinancialYearRangeFromLabel, getFundingAllocations, getHolderSearchTokens, getMaturitySourceEventId, getPayoutModeLabel, getPostTdsAmount, hydrateDeposit, needsPeriodicPayoutSetup, normalizeDeposit, parseAllocationEntries, requestJson, toYmd } from './features/deposits/depositModel.js'
+import { buildOwnerAliasLookup, emptyMasterData, normalizeMasterData } from '../shared/masterData.js'
+
+const ADD_NEW_MASTER_VALUE = '__add_new_master__'
 
 function App() {
   const [deposits, setDeposits] = useState([])
+  const [masterData, setMasterData] = useState(emptyMasterData)
   const [activeTab, setActiveTab] = useState('dashboard')
   const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 780)
   const [mobileDepositsScreen, setMobileDepositsScreen] = useState('list')
@@ -34,6 +39,11 @@ function App() {
   const [loadError, setLoadError] = useState('')
   const [interestFocusMode, setInterestFocusMode] = useState('all')
   const [maturityFocusMode, setMaturityFocusMode] = useState('all')
+  const [isSavingMasters, setIsSavingMasters] = useState(false)
+  const [mastersFeedback, setMastersFeedback] = useState(null)
+  const [mastersIntent, setMastersIntent] = useState(null)
+  const [mastersViewSeed, setMastersViewSeed] = useState(0)
+  const [mastersReturnTarget, setMastersReturnTarget] = useState(null)
   const currentFinancialYear = useMemo(() => getCurrentFinancialYearRange(TODAY), [])
   const [selectedFinancialYear, setSelectedFinancialYear] = useState(currentFinancialYear.label)
   const activeDeposits = useMemo(
@@ -54,19 +64,22 @@ function App() {
       try {
         setIsLoading(true)
         setLoadError('')
-        const data = await requestJson('/api/deposits')
-        const nextDeposits = data.map(hydrateDeposit)
+        const [depositsData, masterDataResponse] = await Promise.all([
+          requestJson('/api/deposits'),
+          requestJson('/api/master-data').catch(() => emptyMasterData),
+        ])
+        const nextDeposits = depositsData.map(hydrateDeposit)
         setDeposits(nextDeposits)
+        setMasterData(normalizeMasterData(masterDataResponse))
         setSelectedId((current) =>
           current && nextDeposits.some((deposit) => deposit.id === current)
             ? current
             : nextDeposits[0]?.id ?? null,
         )
       } catch (error) {
-        const fallbackDeposits = sampleDeposits.map(hydrateDeposit)
-        setDeposits(fallbackDeposits)
-        setSelectedId(fallbackDeposits[0]?.id ?? null)
-        setLoadError(`${error.message}. Showing demo data in memory.`)
+        setDeposits([])
+        setSelectedId(null)
+        setLoadError(error.message)
       } finally {
         setIsLoading(false)
       }
@@ -90,6 +103,7 @@ function App() {
   }, [])
 
   const deferredSearch = useDeferredValue(searchText)
+  const ownerAliasLookup = useMemo(() => buildOwnerAliasLookup(masterData), [masterData])
 
   const cashFlowEvents = useMemo(() => {
     const events = []
@@ -177,8 +191,8 @@ function App() {
           return true
         }
 
-        const holderTokens = getHolderSearchTokens(deposit.holderName)
-        const fundingSourceTokens = getHolderSearchTokens(deposit.fundingSource)
+        const holderTokens = getHolderSearchTokens(deposit.holderName, ownerAliasLookup)
+        const fundingSourceTokens = getHolderSearchTokens(deposit.fundingSource, ownerAliasLookup)
 
         const searchableFields = {
           all: [
@@ -197,7 +211,14 @@ function App() {
           holder: [...holderTokens, deposit.holderName],
           funding: [...fundingSourceTokens, deposit.fundingSource],
           bank: [deposit.bankName, deposit.branchCity, deposit.accountNumber],
-          instrument: [deposit.instrumentType, deposit.tenure, deposit.payoutMode],
+          instrument: [
+            deposit.instrumentType,
+            formatTenure(deposit),
+            deposit.tenureYears,
+            deposit.tenureMonths,
+            deposit.tenureDays,
+            deposit.payoutMode,
+          ],
           group: [deposit.id, ...getFundingAllocations(deposit).map((allocation) => allocation.eventId)],
         }
 
@@ -207,7 +228,7 @@ function App() {
           .includes(query)
       })
       .sort((left, right) => getDateSortValue(left.maturityDate) - getDateSortValue(right.maturityDate))
-  }, [activeDeposits, deferredSearch, searchScope, showClosed])
+  }, [activeDeposits, deferredSearch, ownerAliasLookup, searchScope, showClosed])
 
   const selectedDeposit =
     activeDeposits.find((deposit) => deposit.id === selectedId) ?? activeDeposits[0] ?? null
@@ -486,27 +507,6 @@ function App() {
     setArchiveTargetId(null)
   }
 
-  const loadDemoData = async () => {
-    try {
-      setLoadError('')
-      setIsLoading(true)
-      const nextDeposits = (await requestJson('/api/deposits/reset-demo', {
-        method: 'POST',
-      })).map(hydrateDeposit)
-      setDeposits(nextDeposits)
-      setSelectedId(nextDeposits[0]?.id ?? null)
-      setActiveTab('dashboard')
-      setSelectedFinancialYear(currentFinancialYear.label)
-      setInterestFocusMode('all')
-      setMaturityFocusMode('all')
-      resetForm()
-    } catch (error) {
-      setLoadError(error.message)
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
   const startNewDeposit = () => {
     setEditorReturnTab(activeTab)
     setEditorReturnDepositsScreen(mobileDepositsScreen)
@@ -516,6 +516,36 @@ function App() {
     setInterestFocusMode('all')
     setMaturityFocusMode('all')
     resetForm()
+  }
+
+  const saveMasterData = async (nextMasterData) => {
+    try {
+      setIsSavingMasters(true)
+      setMastersFeedback(null)
+      setLoadError('')
+      const savedMasterData = normalizeMasterData(
+        await requestJson('/api/master-data', {
+          method: 'PUT',
+          body: JSON.stringify(nextMasterData),
+        }),
+      )
+      setMasterData(savedMasterData)
+      setMastersFeedback({
+        type: 'success',
+        message: 'Master data saved.',
+      })
+      if (mastersReturnTarget === 'editor') {
+        setActiveTab('editor')
+      }
+      setMastersReturnTarget(null)
+    } catch (error) {
+      setMastersFeedback({
+        type: 'error',
+        message: error.message,
+      })
+    } finally {
+      setIsSavingMasters(false)
+    }
   }
 
   const startEditing = (deposit) => {
@@ -536,13 +566,15 @@ function App() {
       branchCity: deposit.branchCity ?? '',
       holderName: deposit.holderName ?? '',
       fundingSource: deposit.fundingSource ?? '',
-      instrumentType: deposit.instrumentType ?? 'Bank FD',
+      instrumentType: deposit.instrumentType ?? '',
       payoutMode: getEffectivePayoutMode(deposit) ?? 'on-maturity',
       yearlyPayoutMonthDay: deposit.yearlyPayoutMonthDay ?? '',
       interestPayoutBeforeTds: deposit.interestPayoutBeforeTds ?? '',
       interestPayoutAfterTds: deposit.interestPayoutAfterTds ?? '',
       accountNumber: deposit.accountNumber ?? '',
-      tenure: deposit.tenure ?? '',
+      tenureYears: deposit.tenureYears ?? '',
+      tenureMonths: deposit.tenureMonths ?? '',
+      tenureDays: deposit.tenureDays ?? '',
       interestRate: deposit.interestRate ?? '',
       principalAmount: deposit.principalAmount ?? '',
       investmentDate: deposit.investmentDate ?? '',
@@ -576,13 +608,15 @@ function App() {
       branchCity: deposit.branchCity ?? '',
       holderName: deposit.holderName ?? '',
       fundingSource: deposit.fundingSource ?? '',
-      instrumentType: deposit.instrumentType ?? 'Bank FD',
+      instrumentType: deposit.instrumentType ?? '',
       payoutMode: deposit.payoutMode ?? 'on-maturity',
       yearlyPayoutMonthDay: deposit.yearlyPayoutMonthDay ?? '',
       interestPayoutBeforeTds: deposit.interestPayoutBeforeTds ?? '',
       interestPayoutAfterTds: deposit.interestPayoutAfterTds ?? '',
       accountNumber: '',
-      tenure: deposit.tenure ?? '',
+      tenureYears: deposit.tenureYears ?? '',
+      tenureMonths: deposit.tenureMonths ?? '',
+      tenureDays: deposit.tenureDays ?? '',
       interestRate: deposit.interestRate ?? '',
       principalAmount: deposit.principalAmount ?? '',
       investmentDate: '',
@@ -664,16 +698,61 @@ function App() {
 
   const handleFormChange = (event) => {
     const { name, value } = event.target
-    setFormValues((current) => ({ ...current, [name]: value }))
+    const nextFormValues = { ...formValues, [name]: value }
+    setFormValues(nextFormValues)
     setFormErrors((current) => {
-      if (!current[name]) {
-        return current
+      const next = { ...current }
+
+      if (current[name]) {
+        delete next[name]
       }
 
-      const next = { ...current }
-      delete next[name]
+      if (name === 'status') {
+        if (
+          value === 'Closed' &&
+          String(nextFormValues.maturityAfterTax ?? '').trim() === ''
+        ) {
+          next.maturityAfterTax = 'Enter amount received at maturity before closing this deposit.'
+        } else {
+          delete next.maturityAfterTax
+        }
+      }
+
+      if (name === 'maturityAfterTax' && String(value ?? '').trim() !== '') {
+        delete next.maturityAfterTax
+      }
+
       return next
     })
+  }
+
+  const openMastersForField = (fieldName) => {
+    const nextIntent =
+      fieldName === 'holderName' || fieldName === 'fundingSource'
+        ? { section: 'owners' }
+        : fieldName === 'bankName'
+          ? { section: 'institutions' }
+          : fieldName === 'branchCity'
+            ? { section: 'institutions', mode: 'branch', institutionName: formValues.bankName }
+            : fieldName === 'instrumentType'
+              ? { section: 'instrumentTypes' }
+              : null
+
+    setMastersIntent(nextIntent)
+    setMastersViewSeed((current) => current + 1)
+    setMastersReturnTarget('editor')
+    setMastersFeedback(null)
+    setActiveTab('masters')
+    setIsMobileNavOpen(false)
+  }
+
+  const handleMasterBoundFieldChange = (event) => {
+    if (event.target.value === ADD_NEW_MASTER_VALUE) {
+      openMastersForField(event.target.name)
+      return
+    }
+
+    handleFormChange(event)
   }
 
   const handleFundingSourceSelect = (event) => {
@@ -698,9 +777,7 @@ function App() {
     }
 
     const selectedOption = fundingSourceOptions.find((option) => option.eventId === selectedFundingEventId)
-    const maxAllowed = Number(
-      selectedOption?.currentLinkedAmount || selectedOption?.availableAmount || 0,
-    )
+    const maxAllowed = Number(selectedOption?.availableAmount || 0)
     if (parsedAmount > maxAllowed) {
       return
     }
@@ -715,6 +792,15 @@ function App() {
       ...current,
       allocationsText: formatAllocationsText(nextEntries),
     }))
+    setFormErrors((current) => {
+      if (!current.allocationsText) {
+        return current
+      }
+
+      const next = { ...current }
+      delete next.allocationsText
+      return next
+    })
     setSelectedFundingEventId('')
     setFundingAmountDraft('')
   }
@@ -725,6 +811,16 @@ function App() {
       ...current,
       allocationsText: formatAllocationsText(nextEntries),
     }))
+  }
+
+  const editFundingEntry = (eventId) => {
+    const existingEntry = fundingEntries.find((entry) => entry.eventId === eventId)
+    if (!existingEntry) {
+      return
+    }
+
+    setSelectedFundingEventId(eventId)
+    setFundingAmountDraft(String(existingEntry.amount || ''))
   }
 
   const handleSave = async (event) => {
@@ -754,6 +850,20 @@ function App() {
     }
     if (!effectiveFormValues.maturityDate) {
       nextErrors.maturityDate = 'Enter the maturity date.'
+    }
+    if (
+      effectiveFormValues.status === 'Closed' &&
+      String(effectiveFormValues.maturityAfterTax ?? '').trim() === ''
+    ) {
+      nextErrors.maturityAfterTax = 'Enter amount received at maturity before closing this deposit.'
+    }
+    if (
+      effectiveFormValues.investmentDate &&
+      effectiveFormValues.maturityDate &&
+      new Date(`${effectiveFormValues.maturityDate}T00:00:00`) <
+        new Date(`${effectiveFormValues.investmentDate}T00:00:00`)
+    ) {
+      nextErrors.maturityDate = 'Maturity date must be on or after the investment date.'
     }
     if (effectiveFormValues.payoutMode === 'yearly-fixed' && !effectiveFormValues.yearlyPayoutMonthDay) {
       nextErrors.yearlyPayoutMonthDay = 'Enter the interest payment date in MM-DD format.'
@@ -793,11 +903,9 @@ function App() {
 
       startTransition(() => {
         setDeposits((current) => {
-          if (editingId) {
-            return current.map((deposit) => (deposit.id === editingId ? savedDeposit : deposit))
-          }
-
-          return [savedDeposit, ...current]
+          return editingId
+            ? current.map((deposit) => (deposit.id === editingId ? savedDeposit : deposit))
+            : [savedDeposit, ...current]
         })
       })
 
@@ -822,7 +930,7 @@ function App() {
     )
     setFormValues({
       ...createFreshForm(),
-      fundingSource: cashFlowEvent.holderName || emptyForm.fundingSource,
+      fundingSource: cashFlowEvent.holderName || '',
       principalAmount: suggestedAmount,
       allocationsText: formatAllocationsText([
         {
@@ -899,7 +1007,7 @@ function App() {
 
     setFormValues({
       ...createFreshForm(),
-      fundingSource: selectedDeposit.holderName || emptyForm.fundingSource,
+      fundingSource: selectedDeposit.holderName || '',
       principalAmount: payout,
       allocationsText: formatAllocationsText([
         {
@@ -941,7 +1049,7 @@ function App() {
     setFundingAmountDraft('')
     setFormValues({
       ...createFreshForm(),
-      fundingSource: selectedDeposit.holderName || emptyForm.fundingSource,
+      fundingSource: selectedDeposit.holderName || '',
       principalAmount: totalAvailableInterest,
       allocationsText: formatAllocationsText(availableInterestEntries),
     })
@@ -967,18 +1075,65 @@ function App() {
     formValues.maturityAfterTax !== '' && formValues.principalAmount !== ''
       ? Math.max(Number(formValues.maturityAfterTax || 0) - Number(formValues.principalAmount || 0), 0)
       : 0
-  const computedEditorTdsAmount =
-    formValues.maturityAfterTax !== '' && formValues.maturityBeforeTax !== ''
-      ? Math.max(Number(formValues.maturityBeforeTax || 0) - Number(formValues.maturityAfterTax || 0), 0)
-      : 0
+  const computedEditorTenure = deriveTenureParts(
+    formValues.investmentDate,
+    formValues.maturityDate,
+  )
+  const computedEditorTdsAmount = computeTdsAmount(
+    formValues.maturityBeforeTax,
+    formValues.maturityAfterTax,
+  )
+  const computedEditorTdsPercent = computeTdsPercent(
+    formValues.principalAmount,
+    formValues.maturityBeforeTax,
+    formValues.maturityAfterTax,
+  )
   const createFreshForm = (overrides = {}) => ({
     ...emptyForm,
     srNo: String(nextSrNo),
     investmentDate: toYmd(TODAY),
+    tenureYears: '0',
+    tenureMonths: '0',
+    tenureDays: '0',
+    holderName: masterData.owners[0]?.name || '',
+    fundingSource: masterData.owners[0]?.name || '',
+    instrumentType: masterData.instrumentTypes[0]?.name || '',
     ...overrides,
   })
   const fundingEntriesByEventId = new Map(
     fundingEntries.map((entry) => [entry.eventId, Number(entry.amount || 0)]),
+  )
+  const ensureCurrentValue = (items, currentValue) => {
+    const normalizedValue = String(currentValue || '').trim()
+    if (!normalizedValue) {
+      return items
+    }
+
+    return items.includes(normalizedValue) ? items : [...items, normalizedValue]
+  }
+  const ownerOptions = ensureCurrentValue(
+    masterData.owners.map((owner) => owner.name),
+    formValues.holderName,
+  )
+  const fundingSourceMasterOptions = ensureCurrentValue(ownerOptions, formValues.fundingSource)
+  const institutionOptions = ensureCurrentValue(
+    masterData.institutions.map((institution) => institution.name),
+    formValues.bankName,
+  )
+  const branchOptions = useMemo(() => {
+    const selectedInstitution = masterData.institutions.find(
+      (institution) => institution.name.toLowerCase() === String(formValues.bankName || '').trim().toLowerCase(),
+    )
+
+    const options = selectedInstitution
+      ? selectedInstitution.branches.map((branch) => branch.name)
+      : masterData.institutions.flatMap((institution) => institution.branches.map((branch) => branch.name))
+
+    return ensureCurrentValue(options, formValues.branchCity)
+  }, [formValues.bankName, formValues.branchCity, masterData.institutions])
+  const instrumentTypeOptions = ensureCurrentValue(
+    masterData.instrumentTypes.map((instrument) => instrument.name),
+    formValues.instrumentType,
   )
   const fundingSourceOptions = cashFlowEvents
       .map((event) => {
@@ -1022,9 +1177,16 @@ function App() {
 
   const isMobileEditorScreen = isMobile && activeTab === 'editor'
   const mobileEditorTitle = editingId ? 'Edit deposit' : 'Add deposit'
+  const mobileMastersTitle = 'Masters'
   const hasActiveDepositFilters = searchScope !== 'all' || searchText.trim() !== '' || !showClosed
   const mobileCompactHeaderTitle =
-    activeTab === 'dashboard' ? 'Dashboard' : activeTab === 'deposits' ? 'Deposits' : mobileEditorTitle
+    activeTab === 'dashboard'
+      ? 'Dashboard'
+      : activeTab === 'deposits'
+        ? 'Deposits'
+        : activeTab === 'masters'
+          ? mobileMastersTitle
+          : mobileEditorTitle
   const mobileFilterBadges = [
     searchScope !== 'all' ? `Scope: ${searchScope === 'holder'
       ? 'Holder'
@@ -1038,7 +1200,7 @@ function App() {
     searchText.trim() ? `Search: ${searchText.trim()}` : null,
     !showClosed ? 'Open only' : null,
   ].filter(Boolean)
-  const showMobileCompactHeader = isMobile && activeTab === 'deposits'
+  const showMobileCompactHeader = isMobile && (activeTab === 'deposits' || activeTab === 'masters')
   const showFullHeroCard = !isMobileEditorScreen && !showMobileCompactHeader
 
   const toggleMobileDetailSection = (sectionKey) => {
@@ -1074,7 +1236,15 @@ function App() {
             <div>
               <p className="eyebrow">FD Tracker</p>
               <strong className="mobile-active-tab">
-                {activeTab === 'dashboard' ? 'Dashboard' : activeTab === 'deposits' ? 'Deposits' : editingId ? 'Edit deposit' : 'Add deposit'}
+                {activeTab === 'dashboard'
+                  ? 'Dashboard'
+                  : activeTab === 'deposits'
+                    ? 'Deposits'
+                    : activeTab === 'masters'
+                      ? 'Masters'
+                      : editingId
+                        ? 'Edit deposit'
+                        : 'Add deposit'}
               </strong>
             </div>
             <button
@@ -1104,9 +1274,6 @@ function App() {
                 Use maturity source
               </button>
             )}
-            <button type="button" className="secondary-btn" onClick={loadDemoData}>
-              Load demo data
-            </button>
           </div>
         </header>
       )}
@@ -1134,6 +1301,7 @@ function App() {
             ['dashboard', 'Dashboard'],
             ['deposits', 'Deposits'],
             ['editor', editingId ? 'Edit' : 'Add'],
+            ['masters', 'Masters'],
           ].map(([value, label]) => (
             <button
               key={value}
@@ -1418,6 +1586,7 @@ function App() {
           getPayoutModeLabel={getPayoutModeLabel}
           formatCurrency={formatCurrency}
           formatDate={formatDate}
+          formatTenure={formatTenure}
         />
       )}
 
@@ -1428,11 +1597,18 @@ function App() {
           editingId={editingId}
           leaveEditorScreen={leaveEditorScreen}
           formValues={formValues}
+          ownerOptions={ownerOptions}
+          fundingSourceMasterOptions={fundingSourceMasterOptions}
+          institutionOptions={institutionOptions}
+          branchOptions={branchOptions}
+          instrumentTypeOptions={instrumentTypeOptions}
+          addNewMasterValue={ADD_NEW_MASTER_VALUE}
           sourcePreviewEvents={sourcePreviewEvents}
           formatCurrency={formatCurrency}
           formatDate={formatDate}
           formErrors={formErrors}
           handleFormChange={handleFormChange}
+          handleMasterBoundFieldChange={handleMasterBoundFieldChange}
           effectiveEditorPayoutMode={effectiveEditorPayoutMode}
           isPeriodicEditor={isPeriodicEditor}
           linkedFundingAmount={linkedFundingAmount}
@@ -1445,11 +1621,31 @@ function App() {
           addFundingEntry={addFundingEntry}
           fundingEntries={fundingEntries}
           cashFlowMap={cashFlowMap}
+          editFundingEntry={editFundingEntry}
           removeFundingEntry={removeFundingEntry}
           computedEditorInterestEarned={computedEditorInterestEarned}
           computedEditorTdsAmount={computedEditorTdsAmount}
+          computedEditorTdsPercent={computedEditorTdsPercent}
+          computedEditorTenure={computedEditorTenure}
           handleSave={handleSave}
           resetForm={resetForm}
+        />
+      )}
+
+      {activeTab === 'masters' && (
+        <MastersView
+          key={`${mastersViewSeed}-${JSON.stringify(masterData)}`}
+          isMobile={isMobile}
+          masterData={masterData}
+          isSavingMasters={isSavingMasters}
+          mastersFeedback={mastersFeedback}
+          initialIntent={mastersIntent}
+          saveMasterData={saveMasterData}
+          returnToEditor={() => {
+            setActiveTab('editor')
+            setMastersReturnTarget(null)
+          }}
+          showReturnToEditor={mastersReturnTarget === 'editor'}
         />
       )}
     </div>

@@ -37,6 +37,7 @@ export default function DepositsView({
   getPayoutModeLabel,
   formatCurrency,
   formatDate,
+  formatTenure,
 }) {
   const renderMobileDetailSection = (sectionKey, title, subtitle, children) => (
     <section className="mobile-detail-section">
@@ -189,7 +190,7 @@ export default function DepositsView({
               {deposit.holderName} | {deposit.instrumentType}
             </p>
             <p>
-              {formatCurrency(deposit.principalAmount)} | {deposit.tenure}
+              {formatCurrency(deposit.principalAmount)} | {formatTenure(deposit)}
             </p>
             <p>{deposit.accountNumber || deposit.id}</p>
             <p>{getPayoutModeLabel(deposit)}</p>

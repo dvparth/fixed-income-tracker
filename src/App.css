@@ -328,6 +328,8 @@
 .field {
   display: grid;
   gap: 8px;
+  align-content: start;
+  padding-bottom: 1.15rem;
 }
 
 .field input,
@@ -767,22 +769,31 @@
 
 .funding-picker {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(160px, 0.8fr) auto;
+  grid-template-columns: minmax(0, 1.6fr) minmax(160px, 0.8fr) 124px;
   gap: 10px;
   align-items: end;
   margin-bottom: 12px;
 }
 
 .funding-picker-action {
-  display: flex;
-  align-items: end;
+  justify-content: end;
+}
+
+.funding-picker-action-label {
+  visibility: hidden;
+}
+
+.funding-picker-action .secondary-btn {
+  width: 100%;
+  min-height: 40px;
+  white-space: nowrap;
 }
 
 .editor-source-chip {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
-  align-items: center;
+  align-items: start;
   padding: 12px 14px;
   border-radius: 16px;
   border: 1px solid rgba(125, 99, 69, 0.14);
@@ -804,15 +815,56 @@
   display: grid;
   gap: 4px;
   justify-items: end;
-  min-width: 84px;
+  width: 124px;
   text-align: right;
 }
 
+.editor-source-chip-links {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
 .editor-source-chip-actions .mini-link {
-  justify-self: end;
+  justify-self: auto;
+}
+
+.masters-list,
+.masters-sublist {
+  display: grid;
+  gap: 12px;
+}
+
+.masters-card {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(125, 99, 69, 0.14);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.masters-card-title {
+  min-width: min(100%, 320px);
+}
+
+.masters-card-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.masters-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
 }
 
 .field-error {
+  display: block;
+  min-height: 1rem;
   color: #b55300;
   font-size: 0.78rem;
 }
@@ -934,6 +986,10 @@
     grid-template-columns: 1fr;
   }
 
+  .funding-picker-action-label {
+    display: none;
+  }
+
   .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1015,6 +1071,14 @@
 
   .mobile-editor-panel {
     padding: 14px 14px 136px;
+  }
+
+  .field {
+    padding-bottom: 0;
+  }
+
+  .field-error {
+    min-height: 0;
   }
 
   .mobile-editor-header {

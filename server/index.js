@@ -2,7 +2,7 @@ import cors from 'cors'
 import dotenv from 'dotenv'
 import express from 'express'
 import mongoose from 'mongoose'
-import { demoDeposits } from './demoDeposits.js'
+import { emptyMasterData, normalizeMasterData } from '../shared/masterData.js'
 
 dotenv.config()
 
@@ -26,6 +26,21 @@ const depositSchema = new mongoose.Schema(
 )
 
 const Deposit = mongoose.model('Deposit', depositSchema)
+
+const masterDataSchema = new mongoose.Schema(
+  {
+    key: { type: String, required: true, unique: true, index: true },
+    owners: { type: Array, default: [] },
+    institutions: { type: Array, default: [] },
+    instrumentTypes: { type: Array, default: [] },
+  },
+  {
+    versionKey: false,
+    timestamps: true,
+  },
+)
+
+const MasterData = mongoose.model('MasterData', masterDataSchema)
 
 const getMaturitySourceEventId = (depositId) => `maturity:${depositId}`
 
@@ -82,11 +97,18 @@ const connectDatabase = async () => {
   await mongoose.connect(mongoUri)
 }
 
-const ensureDemoData = async () => {
-  const count = await Deposit.countDocuments()
-  if (count === 0) {
-    await Deposit.insertMany(demoDeposits, { ordered: true })
+const getMasterData = async () => {
+  const existing = await MasterData.findOne({ key: 'default' }).lean()
+
+  if (!existing) {
+    const created = await MasterData.create({
+      key: 'default',
+      ...emptyMasterData,
+    })
+    return normalizeMasterData(created.toObject())
   }
+
+  return normalizeMasterData(existing)
 }
 
 app.use(cors())
@@ -99,6 +121,24 @@ app.get('/api/health', (_request, response) => {
 app.get('/api/deposits', async (_request, response) => {
   const deposits = await Deposit.find({}).lean()
   response.json(deposits.map(normalizeDepositDoc))
+})
+
+app.get('/api/master-data', async (_request, response) => {
+  response.json(await getMasterData())
+})
+
+app.put('/api/master-data', async (request, response) => {
+  const normalized = normalizeMasterData(request.body || {})
+  const updated = await MasterData.findOneAndUpdate(
+    { key: 'default' },
+    {
+      key: 'default',
+      ...normalized,
+    },
+    { new: true, upsert: true, setDefaultsOnInsert: true },
+  ).lean()
+
+  response.json(normalizeMasterData(updated))
 })
 
 app.post('/api/deposits', async (request, response) => {
@@ -119,10 +159,6 @@ app.put('/api/deposits/:id', async (request, response) => {
   }
 
   response.json(normalizeDepositDoc(updated))
-})
-
-app.post('/api/deposits/reset-demo', async (_request, response) => {
-  response.json(demoDeposits)
 })
 
 app.post('/api/deposits/:id/archive', async (request, response) => {
@@ -166,7 +202,9 @@ app.post('/api/deposits/:id/archive', async (request, response) => {
   response.json(normalizeDepositDoc(archived))
 })
 
-app.use((error, _request, response) => {
+// Express recognizes error middleware only when all 4 parameters are present.
+// eslint-disable-next-line no-unused-vars
+app.use((error, _request, response, _next) => {
   console.error(error)
   response.status(500).json({
     message: error?.message || 'Unexpected server error',
@@ -175,7 +213,6 @@ app.use((error, _request, response) => {
 
 const start = async () => {
   await connectDatabase()
-  await ensureDemoData()
   app.listen(PORT, () => {
     console.log(`FD tracker API listening on http://localhost:${PORT}`)
   })

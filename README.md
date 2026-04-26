@@ -11,7 +11,7 @@ It is designed around one practical problem: fixed-income investments do not liv
 - Link new investments back to maturity or interest funding
 - View reinvestment usage and remaining allocable cash
 - Mobile-first navigation for overview, deposits, and add/edit workflows
-- Express + MongoDB backend with demo-data support for local development
+- Express + MongoDB backend
 
 ## Tech Stack
 
@@ -36,7 +36,9 @@ src/
 
 server/
   index.js
-  demoDeposits.js
+
+shared/
+  masterData.js
 ```
 
 ## Local Setup
@@ -73,7 +75,8 @@ Frontend runs on Vite and proxies `/api` requests to the Express backend.
 
 - The frontend is being split into feature-oriented modules so the app can scale beyond a single `App.jsx`.
 - Funding references use stable event identifiers such as `maturity:<depositId>` and `interest:<depositId>:<yyyy-mm-dd>`.
-- Demo data loading is intentionally non-destructive and meant only for UI exploration.
+- The app now operates against stored data only, with no in-memory demo fallback.
+- Reference values such as owners, funding sources, institutions, branches, and instrument types now flow through a shared master-data model.
 
 ## Roadmap
 

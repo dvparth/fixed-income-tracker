@@ -4,11 +4,18 @@ export default function DepositEditorView({
   editingId,
   leaveEditorScreen,
   formValues,
+  ownerOptions,
+  fundingSourceMasterOptions,
+  institutionOptions,
+  branchOptions,
+  instrumentTypeOptions,
+  addNewMasterValue,
   sourcePreviewEvents,
   formatCurrency,
   formatDate,
   formErrors,
   handleFormChange,
+  handleMasterBoundFieldChange,
   effectiveEditorPayoutMode,
   isPeriodicEditor,
   linkedFundingAmount,
@@ -21,12 +28,30 @@ export default function DepositEditorView({
   addFundingEntry,
   fundingEntries,
   cashFlowMap,
+  editFundingEntry,
   removeFundingEntry,
   computedEditorInterestEarned,
   computedEditorTdsAmount,
+  computedEditorTdsPercent,
+  computedEditorTenure,
   handleSave,
   resetForm,
 }) {
+  const tenureParts = [
+    computedEditorTenure.years > 0
+      ? `${computedEditorTenure.years} Year${computedEditorTenure.years === 1 ? '' : 's'}`
+      : null,
+    computedEditorTenure.months > 0
+      ? `${computedEditorTenure.months} Month${computedEditorTenure.months === 1 ? '' : 's'}`
+      : null,
+    computedEditorTenure.days > 0
+      ? `${computedEditorTenure.days} Day${computedEditorTenure.days === 1 ? '' : 's'}`
+      : null,
+  ].filter(Boolean)
+
+  const tenureSummary = tenureParts.length > 0 ? tenureParts.join(' ') : 'Will appear after both dates are entered'
+  const isEditingFundingEntry = fundingEntries.some((entry) => entry.eventId === selectedFundingEventId)
+
   return (
     <section className="stack">
       <article className={isMobileEditorScreen ? 'panel mobile-editor-panel' : 'panel'}>
@@ -57,11 +82,11 @@ export default function DepositEditorView({
           </div>
         </div>
 
-        <form className="editor-form" onSubmit={handleSave}>
+        <form className="editor-form" onSubmit={handleSave} autoComplete="off">
           <div className="editor-summary">
             <div className="editor-summary-card">
               <span>New investment</span>
-              <strong>{formValues.instrumentType || 'Bank FD'}</strong>
+              <strong>{formValues.instrumentType || 'Choose instrument'}</strong>
               <small>{formValues.holderName || 'Choose holder'}</small>
             </div>
             <div className="editor-summary-card">
@@ -96,21 +121,57 @@ export default function DepositEditorView({
             <div className="editor-grid">
               <label className="field">
                 <span>Holder</span>
-                <input name="holderName" value={formValues.holderName} onChange={handleFormChange} placeholder="Me" />
+                <select name="holderName" value={formValues.holderName} onChange={handleMasterBoundFieldChange}>
+                  <option value="">Choose owner</option>
+                  {ownerOptions.map((ownerName) => (
+                    <option key={ownerName} value={ownerName}>
+                      {ownerName}
+                    </option>
+                  ))}
+                  <option value={addNewMasterValue}>Add new owner...</option>
+                </select>
                 {formErrors.holderName && <small className="field-error">{formErrors.holderName}</small>}
               </label>
               <label className="field">
                 <span>Bank or issuer</span>
-                <input name="bankName" value={formValues.bankName} onChange={handleFormChange} placeholder="e.g. HDFC Bank" />
+                <select name="bankName" value={formValues.bankName} onChange={handleMasterBoundFieldChange}>
+                  <option value="">Choose bank or issuer</option>
+                  {institutionOptions.map((institutionName) => (
+                    <option key={institutionName} value={institutionName}>
+                      {institutionName}
+                    </option>
+                  ))}
+                  <option value={addNewMasterValue}>Add new bank or issuer...</option>
+                </select>
                 {formErrors.bankName && <small className="field-error">{formErrors.bankName}</small>}
               </label>
               <label className="field">
                 <span>Funded by</span>
-                <input name="fundingSource" value={formValues.fundingSource} onChange={handleFormChange} placeholder="Me, Wife, Mixed" />
+                <select name="fundingSource" value={formValues.fundingSource} onChange={handleMasterBoundFieldChange}>
+                  <option value="">Choose funding source</option>
+                  {fundingSourceMasterOptions.map((sourceName) => (
+                    <option key={sourceName} value={sourceName}>
+                      {sourceName}
+                    </option>
+                  ))}
+                  <option value={addNewMasterValue}>Add new owner...</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Branch city</span>
+                <select name="branchCity" value={formValues.branchCity} onChange={handleMasterBoundFieldChange}>
+                  <option value="">Choose branch</option>
+                  {branchOptions.map((branchName) => (
+                    <option key={branchName} value={branchName}>
+                      {branchName}
+                    </option>
+                  ))}
+                  {formValues.bankName && <option value={addNewMasterValue}>Add new branch...</option>}
+                </select>
               </label>
               <label className="field">
                 <span>Account or certificate no.</span>
-                <input name="accountNumber" value={formValues.accountNumber} onChange={handleFormChange} placeholder="e.g. ICICI-FD-8127" />
+                <input name="accountNumber" value={formValues.accountNumber} onChange={handleFormChange} placeholder="e.g. ICICI-FD-8127" autoComplete="off" />
                 {formErrors.accountNumber && <small className="field-error">{formErrors.accountNumber}</small>}
               </label>
             </div>
@@ -124,11 +185,14 @@ export default function DepositEditorView({
             <div className="editor-grid">
               <label className="field">
                 <span>Instrument</span>
-                <select name="instrumentType" value={formValues.instrumentType} onChange={handleFormChange}>
-                  <option value="Bank FD">Bank FD</option>
-                  <option value="SCSS">SCSS</option>
-                  <option value="Bond">Bond</option>
-                  <option value="Other">Other</option>
+                <select name="instrumentType" value={formValues.instrumentType} onChange={handleMasterBoundFieldChange}>
+                  <option value="">Choose instrument</option>
+                  {instrumentTypeOptions.map((instrumentName) => (
+                    <option key={instrumentName} value={instrumentName}>
+                      {instrumentName}
+                    </option>
+                  ))}
+                  <option value={addNewMasterValue}>Add new instrument type...</option>
                 </select>
               </label>
               <label className="field">
@@ -140,17 +204,13 @@ export default function DepositEditorView({
                 </select>
               </label>
               <label className="field">
-                <span>Tenure</span>
-                <input name="tenure" value={formValues.tenure} onChange={handleFormChange} placeholder="e.g. 1 year or 444 days" />
-              </label>
-              <label className="field">
                 <span>Interest rate %</span>
-                <input name="interestRate" type="number" step="0.01" value={formValues.interestRate} onChange={handleFormChange} placeholder="e.g. 7.3" />
+                <input name="interestRate" type="number" step="0.01" value={formValues.interestRate} onChange={handleFormChange} placeholder="e.g. 7.3" autoComplete="off" />
               </label>
               {effectiveEditorPayoutMode === 'yearly-fixed' && (
                 <label className="field">
                   <span>Interest payment date</span>
-                  <input name="yearlyPayoutMonthDay" value={formValues.yearlyPayoutMonthDay} onChange={handleFormChange} placeholder="07-15" />
+                  <input name="yearlyPayoutMonthDay" value={formValues.yearlyPayoutMonthDay} onChange={handleFormChange} placeholder="07-15" autoComplete="off" />
                   {formErrors.yearlyPayoutMonthDay && <small className="field-error">{formErrors.yearlyPayoutMonthDay}</small>}
                 </label>
               )}
@@ -158,11 +218,11 @@ export default function DepositEditorView({
                 <>
                   <label className="field">
                     <span>Interest paid before TDS</span>
-                    <input name="interestPayoutBeforeTds" type="number" value={formValues.interestPayoutBeforeTds} onChange={handleFormChange} placeholder="e.g. 30750" />
+                    <input name="interestPayoutBeforeTds" type="number" value={formValues.interestPayoutBeforeTds} onChange={handleFormChange} placeholder="e.g. 30750" autoComplete="off" />
                   </label>
                   <label className="field">
                     <span>Amount received each payout</span>
-                    <input name="interestPayoutAfterTds" type="number" value={formValues.interestPayoutAfterTds} onChange={handleFormChange} placeholder="e.g. 27675" />
+                    <input name="interestPayoutAfterTds" type="number" value={formValues.interestPayoutAfterTds} onChange={handleFormChange} placeholder="e.g. 27675" autoComplete="off" />
                     {formErrors.interestPayoutAfterTds && <small className="field-error">{formErrors.interestPayoutAfterTds}</small>}
                   </label>
                 </>
@@ -178,30 +238,36 @@ export default function DepositEditorView({
             <div className="editor-grid">
               <label className="field">
                 <span>Principal amount</span>
-                <input name="principalAmount" type="number" value={formValues.principalAmount} onChange={handleFormChange} placeholder="e.g. 100000" />
+                <input name="principalAmount" type="number" value={formValues.principalAmount} onChange={handleFormChange} placeholder="e.g. 100000" autoComplete="off" />
                 {formErrors.principalAmount && <small className="field-error">{formErrors.principalAmount}</small>}
               </label>
               <label className="field">
                 <span>Investment date</span>
-                <input name="investmentDate" type="date" value={formValues.investmentDate} onChange={handleFormChange} />
+                <input name="investmentDate" type="date" value={formValues.investmentDate} onChange={handleFormChange} autoComplete="off" />
                 {formErrors.investmentDate && <small className="field-error">{formErrors.investmentDate}</small>}
               </label>
               <label className="field">
                 <span>Maturity date</span>
-                <input name="maturityDate" type="date" value={formValues.maturityDate} onChange={handleFormChange} />
+                <input name="maturityDate" type="date" value={formValues.maturityDate} onChange={handleFormChange} autoComplete="off" />
                 {formErrors.maturityDate && <small className="field-error">{formErrors.maturityDate}</small>}
               </label>
+              <div className="field full">
+                <span>Calculated tenure</span>
+                <div className="editor-summary-card">
+                  <strong>{tenureSummary}</strong>
+                  <small>
+                    {computedEditorTenure.years}Y • {computedEditorTenure.months}M • {computedEditorTenure.days}D
+                  </small>
+                </div>
+              </div>
               <label className="field">
                 <span>Amount at maturity before TDS</span>
-                <input name="maturityBeforeTax" type="number" value={formValues.maturityBeforeTax} onChange={handleFormChange} />
+                <input name="maturityBeforeTax" type="number" value={formValues.maturityBeforeTax} onChange={handleFormChange} autoComplete="off" />
               </label>
               <label className="field">
                 <span>Amount received at maturity</span>
-                <input name="maturityAfterTax" type="number" value={formValues.maturityAfterTax} onChange={handleFormChange} />
-              </label>
-              <label className="field">
-                <span>TDS %</span>
-                <input name="tdsPercent" type="number" step="0.01" value={formValues.tdsPercent} onChange={handleFormChange} />
+                <input name="maturityAfterTax" type="number" value={formValues.maturityAfterTax} onChange={handleFormChange} autoComplete="off" />
+                {formErrors.maturityAfterTax && <small className="field-error">{formErrors.maturityAfterTax}</small>}
               </label>
             </div>
           </section>
@@ -236,11 +302,14 @@ export default function DepositEditorView({
               </label>
               <label className="field">
                 <span>Amount to use</span>
-                <input type="number" value={fundingAmountDraft} onChange={(event) => setFundingAmountDraft(event.target.value)} placeholder="e.g. 5000" />
+                <input type="number" value={fundingAmountDraft} onChange={(event) => setFundingAmountDraft(event.target.value)} placeholder="e.g. 5000" autoComplete="off" />
               </label>
-              <div className="funding-picker-action">
+              <div className="field funding-picker-action">
+                <span className="funding-picker-action-label" aria-hidden="true">
+                  Action
+                </span>
                 <button type="button" className="secondary-btn compact" onClick={addFundingEntry}>
-                  Add source
+                  {isEditingFundingEntry ? 'Update source' : 'Add source'}
                 </button>
               </div>
             </div>
@@ -266,9 +335,14 @@ export default function DepositEditorView({
                       </div>
                       <div className="editor-source-chip-actions">
                         <strong>{formatCurrency(entry.amount)}</strong>
-                        <button type="button" className="mini-link" onClick={() => removeFundingEntry(entry.eventId)}>
-                          Remove
-                        </button>
+                        <div className="editor-source-chip-links">
+                          <button type="button" className="mini-link" onClick={() => editFundingEntry(entry.eventId)}>
+                            Edit
+                          </button>
+                          <button type="button" className="mini-link" onClick={() => removeFundingEntry(entry.eventId)}>
+                            Remove
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )
@@ -285,6 +359,7 @@ export default function DepositEditorView({
                   value={formValues.allocationsText}
                   onChange={handleFormChange}
                   rows="4"
+                  autoComplete="off"
                   placeholder={`maturity:fd-2=3000\ninterest:fd-5:2025-12-31=4000`}
                 />
                 <small className="field-help">
@@ -298,20 +373,20 @@ export default function DepositEditorView({
             <summary>More details</summary>
             <div className="editor-grid">
               <label className="field">
-                <span>Branch city</span>
-                <input name="branchCity" value={formValues.branchCity} onChange={handleFormChange} />
-              </label>
-              <label className="field">
                 <span>Sr. No</span>
-                <input name="srNo" value={formValues.srNo} readOnly />
+                <input name="srNo" value={formValues.srNo} readOnly autoComplete="off" />
               </label>
               <label className="field">
                 <span>Total interest earned</span>
-                <input name="totalInterestEarned" type="number" value={computedEditorInterestEarned} readOnly />
+                <input name="totalInterestEarned" type="number" value={computedEditorInterestEarned} readOnly autoComplete="off" />
               </label>
               <label className="field">
                 <span>TDS amount</span>
-                <input name="tdsAmount" type="number" value={computedEditorTdsAmount} readOnly />
+                <input name="tdsAmount" type="number" value={computedEditorTdsAmount} readOnly autoComplete="off" />
+              </label>
+              <label className="field">
+                <span>TDS %</span>
+                <input name="tdsPercent" type="number" step="0.01" value={computedEditorTdsPercent} readOnly autoComplete="off" />
               </label>
               <label className="field">
                 <span>Status</span>
@@ -330,7 +405,7 @@ export default function DepositEditorView({
             </div>
             <label className="field full">
               <span>Notes</span>
-              <textarea name="notes" value={formValues.notes} onChange={handleFormChange} rows="4" />
+              <textarea name="notes" value={formValues.notes} onChange={handleFormChange} rows="4" autoComplete="off" />
             </label>
           </section>
 
