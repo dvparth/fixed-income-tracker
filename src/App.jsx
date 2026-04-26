@@ -1187,9 +1187,9 @@ function App() {
     searchText.trim() ? `Search: ${searchText.trim()}` : null,
     !showClosed ? 'Open only' : null,
   ].filter(Boolean)
-  const showMobileAppHeader = isMobile && !isMobileEditorScreen
-  const showFullHeroCard = !isMobile && !isMobileEditorScreen
-  const showMobileHeroStrip = isMobile && activeTab === 'dashboard' && !isMobileEditorScreen
+  const showAppHeader = !isMobileEditorScreen
+  const showFullHeroCard = false
+  const showHeroStrip = activeTab === 'dashboard' && !isMobileEditorScreen
   const helpCopy = {
     'active-principal': 'This is the total amount still invested in open deposits.',
     'interest-realised': 'This is the interest already earned in the selected financial year.',
@@ -1232,7 +1232,7 @@ function App() {
 
   return (
     <div className="shell theme-midnight-navy">
-      {showMobileAppHeader && (
+      {showAppHeader && (
         <header className="app-topbar">
           <div className="app-topbar-copy">
             <strong className="app-topbar-title">YieldFlow</strong>
@@ -1254,7 +1254,7 @@ function App() {
         </header>
       )}
 
-      {showMobileHeroStrip && (
+      {showHeroStrip && (
         <section className="mobile-hero-strip">
           <p>Track maturity, interest payouts, and reinvestment in one place.</p>
         </section>
