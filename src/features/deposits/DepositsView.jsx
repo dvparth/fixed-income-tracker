@@ -1,6 +1,13 @@
+import BulkImportPanel from '../import/BulkImportPanel.jsx'
+
+const SHOW_BULK_IMPORT = false
+
 export default function DepositsView({
   isMobile,
   isReadOnly,
+  ownerUserId,
+  activePortfolioLabel,
+  onImportSuccess,
   mobileDepositsScreen,
   isMobileFiltersOpen,
   setIsMobileFiltersOpen,
@@ -47,6 +54,68 @@ export default function DepositsView({
   todayTime,
   canDeletePortfolio,
 }) {
+  const formatInterestRate = (value) => {
+    if (value === '' || value === null || value === undefined || Number.isNaN(Number(value))) {
+      return '--'
+    }
+
+    return `${Number(Number(value).toFixed(4)).toString()}%`
+  }
+
+  const renderMaturityUsageContent = () => {
+    if (selectedReinvestmentSummary?.availableAmount === null) {
+      return <p>Add final post-TDS maturity amount after closure to track unused maturity cash.</p>
+    }
+
+    if (!selectedReinvestmentSummary.isRealized) {
+      return (
+        <>
+          <p><strong>Expected post-TDS at maturity:</strong> {formatCurrency(selectedReinvestmentSummary.availableAmount)}</p>
+          <p><strong>Maturity date:</strong> {formatDate(selectedDeposit.maturityDate)}</p>
+          <p>This amount is not available for reinvestment yet because the maturity has not been realized.</p>
+        </>
+      )
+    }
+
+    return (
+      <>
+        <p><strong>Post-TDS maturity available:</strong> {formatCurrency(selectedReinvestmentSummary.availableAmount)}</p>
+        <p><strong>Already reinvested:</strong> {formatCurrency(selectedReinvestmentSummary.reinvestedAmount)}</p>
+        <p>
+          <strong>Still uninvested:</strong>{' '}
+          <span className={selectedReinvestmentSummary.uninvestedAmount > 0 ? 'amount-warning' : 'amount-ok'}>
+            {formatCurrency(selectedReinvestmentSummary.uninvestedAmount)}
+          </span>
+        </p>
+        {!isReadOnly && selectedReinvestmentSummary.uninvestedAmount > 0 && (
+          <div className="schedule-actions">
+            <button type="button" className="secondary-btn compact" onClick={fillFromSelectedMaturity}>
+              Use as source
+            </button>
+          </div>
+        )}
+        {selectedReinvestmentSummary.children.length > 0 && (
+          <div className="allocation-breakdown">
+            <p className="allocation-title">Used in investments</p>
+            <div className="allocation-breakdown-list">
+              {selectedReinvestmentSummary.children.map((child) => (
+                <button
+                  key={`${selectedDeposit.id}-${child.deposit.id}-${child.amount}`}
+                  type="button"
+                  className="allocation-pill"
+                  onClick={() => openDepositDetail(child.deposit.id)}
+                >
+                  <strong>{child.deposit.bankName}</strong>
+                  <span>{child.deposit.accountNumber} | {formatCurrency(child.amount)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </>
+    )
+  }
+
   const getElapsedPercent = (deposit) => {
     const start = new Date(`${deposit.investmentDate}T00:00:00`).getTime()
     const end = new Date(`${deposit.maturityDate}T00:00:00`).getTime()
@@ -137,6 +206,15 @@ export default function DepositsView({
           </button>
         )}
       </div>
+
+      {!isReadOnly && SHOW_BULK_IMPORT && (
+        <BulkImportPanel
+          ownerUserId={ownerUserId}
+          portfolioLabel={activePortfolioLabel}
+          onImportSuccess={onImportSuccess}
+          isReadOnly={isReadOnly}
+        />
+      )}
 
       {isMobile ? (
         <div className="mobile-filter-shell">
@@ -359,7 +437,7 @@ export default function DepositsView({
                   <div><span>Instrument</span><strong>{selectedDeposit.instrumentType}</strong></div>
                   <div><span>Payout mode</span><strong>{getPayoutModeLabel(selectedDeposit)}</strong></div>
                   <div><span>Principal</span><strong>{formatCurrency(selectedDeposit.principalAmount)}</strong></div>
-                  <div><span>Interest rate</span><strong>{selectedDeposit.interestRate}%</strong></div>
+                  <div><span>Interest rate</span><strong>{formatInterestRate(selectedDeposit.interestRate)}</strong></div>
                   <div><span>Interest payout before TDS</span><strong>{formatCurrency(selectedDeposit.interestPayoutBeforeTds)}</strong></div>
                   <div><span>Interest payout after TDS</span><strong>{formatCurrency(selectedDeposit.interestPayoutAfterTds)}</strong></div>
                   <div><span>Invested on</span><strong>{formatDate(selectedDeposit.investmentDate)}</strong></div>
@@ -409,49 +487,13 @@ export default function DepositsView({
                 'maturity',
                 'Maturity use',
                 selectedReinvestmentSummary?.availableAmount !== null
-                  ? formatCurrency(selectedReinvestmentSummary.uninvestedAmount)
+                  ? selectedReinvestmentSummary.isRealized
+                    ? formatCurrency(selectedReinvestmentSummary.uninvestedAmount)
+                    : `Expected ${formatCurrency(selectedReinvestmentSummary.availableAmount)}`
                   : 'Needs maturity amount',
                 <div className="allocation-card mobile-section-block">
                   <p className="allocation-title">Maturity usage</p>
-                  {selectedReinvestmentSummary?.availableAmount !== null ? (
-                    <>
-                      <p><strong>Post-TDS maturity available:</strong> {formatCurrency(selectedReinvestmentSummary.availableAmount)}</p>
-                      <p><strong>Already reinvested:</strong> {formatCurrency(selectedReinvestmentSummary.reinvestedAmount)}</p>
-                      <p>
-                        <strong>Still uninvested:</strong>{' '}
-                        <span className={selectedReinvestmentSummary.uninvestedAmount > 0 ? 'amount-warning' : 'amount-ok'}>
-                          {formatCurrency(selectedReinvestmentSummary.uninvestedAmount)}
-                        </span>
-                      </p>
-                      {!isReadOnly && selectedReinvestmentSummary.isRealized && selectedReinvestmentSummary.uninvestedAmount > 0 && (
-                        <div className="schedule-actions">
-                          <button type="button" className="secondary-btn compact" onClick={fillFromSelectedMaturity}>
-                            Use as source
-                          </button>
-                        </div>
-                      )}
-                      {selectedReinvestmentSummary.children.length > 0 && (
-                        <div className="allocation-breakdown">
-                          <p className="allocation-title">Used in investments</p>
-                          <div className="allocation-breakdown-list">
-                            {selectedReinvestmentSummary.children.map((child) => (
-                              <button
-                                key={`${selectedDeposit.id}-${child.deposit.id}-${child.amount}`}
-                                type="button"
-                                className="allocation-pill"
-                                onClick={() => openDepositDetail(child.deposit.id)}
-                              >
-                                <strong>{child.deposit.bankName}</strong>
-                                <span>{child.deposit.accountNumber} | {formatCurrency(child.amount)}</span>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <p>Add final post-TDS maturity amount after closure to track unused maturity cash.</p>
-                  )}
+                  {renderMaturityUsageContent()}
                 </div>,
               )}
 
@@ -549,7 +591,7 @@ export default function DepositsView({
                 <div><span>Instrument</span><strong>{selectedDeposit.instrumentType}</strong></div>
                 <div><span>Payout mode</span><strong>{getPayoutModeLabel(selectedDeposit)}</strong></div>
                 <div><span>Principal</span><strong>{formatCurrency(selectedDeposit.principalAmount)}</strong></div>
-                <div><span>Interest rate</span><strong>{selectedDeposit.interestRate}%</strong></div>
+                <div><span>Interest rate</span><strong>{formatInterestRate(selectedDeposit.interestRate)}</strong></div>
                 <div><span>Interest payout before TDS</span><strong>{formatCurrency(selectedDeposit.interestPayoutBeforeTds)}</strong></div>
                 <div><span>Interest payout after TDS</span><strong>{formatCurrency(selectedDeposit.interestPayoutAfterTds)}</strong></div>
                 <div><span>Invested on</span><strong>{formatDate(selectedDeposit.investmentDate)}</strong></div>
@@ -589,45 +631,7 @@ export default function DepositsView({
 
               <div className="allocation-card">
                 <p className="allocation-title">Maturity usage</p>
-                {selectedReinvestmentSummary?.availableAmount !== null ? (
-                  <>
-                    <p><strong>Post-TDS maturity available:</strong> {formatCurrency(selectedReinvestmentSummary.availableAmount)}</p>
-                    <p><strong>Already reinvested:</strong> {formatCurrency(selectedReinvestmentSummary.reinvestedAmount)}</p>
-                    <p>
-                      <strong>Still uninvested:</strong>{' '}
-                      <span className={selectedReinvestmentSummary.uninvestedAmount > 0 ? 'amount-warning' : 'amount-ok'}>
-                        {formatCurrency(selectedReinvestmentSummary.uninvestedAmount)}
-                      </span>
-                    </p>
-                    {!isReadOnly && selectedReinvestmentSummary.isRealized && selectedReinvestmentSummary.uninvestedAmount > 0 && (
-                      <div className="schedule-actions">
-                        <button type="button" className="secondary-btn compact" onClick={fillFromSelectedMaturity}>
-                          Use as source
-                        </button>
-                      </div>
-                    )}
-                    {selectedReinvestmentSummary.children.length > 0 && (
-                      <div className="allocation-breakdown">
-                        <p className="allocation-title">Used in investments</p>
-                        <div className="allocation-breakdown-list">
-                          {selectedReinvestmentSummary.children.map((child) => (
-                            <button
-                              key={`${selectedDeposit.id}-${child.deposit.id}-${child.amount}`}
-                              type="button"
-                              className="allocation-pill"
-                              onClick={() => openDepositDetail(child.deposit.id)}
-                            >
-                              <strong>{child.deposit.bankName}</strong>
-                              <span>{child.deposit.accountNumber} | {formatCurrency(child.amount)}</span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <p>Add final post-TDS maturity amount after closure to track unused maturity cash.</p>
-                )}
+                {renderMaturityUsageContent()}
               </div>
 
               {selectedInterestEvents.length > 0 && (

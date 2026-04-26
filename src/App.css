@@ -230,6 +230,93 @@
   flex-wrap: wrap;
 }
 
+.import-panel {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  margin-bottom: 16px;
+  border: 1px dashed var(--border-color);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--card-bg) 78%, transparent);
+}
+
+.import-actions {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+.import-preview {
+  display: grid;
+  gap: 14px;
+}
+
+.import-master-changes {
+  display: grid;
+  gap: 10px;
+}
+
+.import-master-change-block {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--card-bg) 88%, transparent);
+}
+
+.import-master-change-block strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-primary);
+}
+
+.import-master-change-block p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.import-error-list {
+  display: grid;
+  gap: 10px;
+}
+
+.import-error-list h4 {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.import-preview-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+}
+
+.import-preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 900px;
+}
+
+.import-preview-table th,
+.import-preview-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-color);
+  text-align: left;
+  vertical-align: top;
+  font-size: 0.88rem;
+}
+
+.import-preview-table th {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--card-bg-strong) 94%, transparent);
+}
+
+.import-preview-table td {
+  color: var(--text-secondary);
+}
+
 .mobile-hero-strip {
   display: block;
   margin-bottom: 12px;
@@ -401,6 +488,24 @@
   min-height: 116px;
   align-content: start;
   overflow: visible;
+}
+
+.stat-card-action {
+  width: 100%;
+  border: 1px solid var(--border-color);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 140ms ease,
+    box-shadow 140ms ease,
+    border-color 140ms ease;
+}
+
+.stat-card-action:hover,
+.stat-card-action:focus-visible {
+  transform: translateY(-1px);
+  border-color: var(--border-accent);
+  box-shadow: 0 14px 28px color-mix(in srgb, var(--shadow-color) 115%, transparent);
 }
 
 .stat-card.accent {

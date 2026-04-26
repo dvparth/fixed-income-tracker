@@ -3,6 +3,9 @@ import cors from 'cors'
 import dotenv from 'dotenv'
 import express from 'express'
 import mongoose from 'mongoose'
+import multer from 'multer'
+import * as XLSX from 'xlsx'
+import { INVESTMENT_IMPORT_REQUIRED_COLUMNS, INVESTMENT_IMPORT_SHEET_NAME } from '../shared/investmentImport.js'
 import { emptyMasterData, normalizeMasterData } from '../shared/masterData.js'
 
 dotenv.config()
@@ -50,6 +53,12 @@ if (!sessionSecret) {
 
 const SESSION_COOKIE_NAME = 'yieldflow_session'
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30
+const importUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 1024 * 1024 * 5,
+  },
+})
 const normalizedCookieSameSite =
   cookieSameSite === 'none'
     ? 'None'
@@ -212,6 +221,202 @@ const buildPortfolioDisplayName = (user, fallbackId) => {
   return normalizedFallbackId ? `Portfolio ${normalizedFallbackId.slice(0, 6)}` : 'Portfolio'
 }
 
+const normalizeText = (value) => String(value || '').trim().toLowerCase()
+
+const createMasterId = (value) =>
+  normalizeText(value)
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'item'
+
+const parseNumber = (value) => {
+  if (value === '' || value === null || value === undefined) {
+    return ''
+  }
+
+  const normalizedValue =
+    typeof value === 'string' ? value.replace(/,/g, '').trim() : value
+  const number = Number(normalizedValue)
+  return Number.isFinite(number) ? number : ''
+}
+
+const toYmd = (date) => {
+  const year = date.getFullYear()
+  const month = `${date.getMonth() + 1}`.padStart(2, '0')
+  const day = `${date.getDate()}`.padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const normalizeImportDate = (value) => {
+  if (!value && value !== 0) {
+    return ''
+  }
+
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return toYmd(value)
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const parsed = XLSX.SSF.parse_date_code(value)
+    if (!parsed) {
+      return ''
+    }
+
+    const candidate = new Date(parsed.y, parsed.m - 1, parsed.d)
+    return Number.isNaN(candidate.getTime()) ? '' : toYmd(candidate)
+  }
+
+  const rawValue = String(value || '').trim()
+  if (!rawValue) {
+    return ''
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(rawValue)) {
+    return rawValue
+  }
+
+  const slashMatch = rawValue.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/)
+  if (slashMatch) {
+    const [, day, month, year] = slashMatch
+    const candidate = new Date(Number(year), Number(month) - 1, Number(day))
+    return Number.isNaN(candidate.getTime()) ? '' : toYmd(candidate)
+  }
+
+  const candidate = new Date(rawValue)
+  return Number.isNaN(candidate.getTime()) ? '' : toYmd(candidate)
+}
+
+const shiftDateByCalendar = (date, years = 0, months = 0) => {
+  const source = new Date(date)
+  const sourceDay = source.getDate()
+  const targetMonthIndex = source.getMonth() + months
+  const targetYear = source.getFullYear() + years + Math.floor(targetMonthIndex / 12)
+  const normalizedMonthIndex = ((targetMonthIndex % 12) + 12) % 12
+  const maxDay = new Date(targetYear, normalizedMonthIndex + 1, 0).getDate()
+  const cappedDay = Math.min(sourceDay, maxDay)
+
+  return new Date(targetYear, normalizedMonthIndex, cappedDay)
+}
+
+const deriveTenureParts = (investmentDate, maturityDate) => {
+  if (!investmentDate || !maturityDate) {
+    return { years: 0, months: 0, days: 0 }
+  }
+
+  const start = new Date(`${investmentDate}T00:00:00`)
+  const end = new Date(`${maturityDate}T00:00:00`)
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) {
+    return { years: 0, months: 0, days: 0 }
+  }
+
+  let years = end.getFullYear() - start.getFullYear()
+  while (years > 0 && shiftDateByCalendar(start, years, 0) > end) {
+    years -= 1
+  }
+
+  const afterYears = shiftDateByCalendar(start, years, 0)
+  let months =
+    (end.getFullYear() - afterYears.getFullYear()) * 12 +
+    (end.getMonth() - afterYears.getMonth())
+  while (months > 0 && shiftDateByCalendar(afterYears, 0, months) > end) {
+    months -= 1
+  }
+
+  const afterMonths = shiftDateByCalendar(afterYears, 0, months)
+  const days = Math.max(
+    Math.round((end.getTime() - afterMonths.getTime()) / (1000 * 60 * 60 * 24)),
+    0,
+  )
+
+  return { years, months, days }
+}
+
+const computeTdsAmount = (maturityBeforeTax, maturityAfterTax) => {
+  const grossAmount = parseNumber(maturityBeforeTax)
+  const netAmount = parseNumber(maturityAfterTax)
+
+  if (grossAmount === '' || netAmount === '') {
+    return 0
+  }
+
+  return Math.max(Number(grossAmount) - Number(netAmount), 0)
+}
+
+const computeTdsPercent = (principalAmount, maturityBeforeTax, maturityAfterTax) => {
+  const principal = parseNumber(principalAmount)
+  const grossAmount = parseNumber(maturityBeforeTax)
+  const tdsAmount = computeTdsAmount(maturityBeforeTax, maturityAfterTax)
+  const preTdsInterest =
+    principal === '' || grossAmount === ''
+      ? 0
+      : Math.max(Number(grossAmount) - Number(principal), 0)
+
+  if (preTdsInterest <= 0 || tdsAmount <= 0) {
+    return 0
+  }
+
+  return Number(((tdsAmount / preTdsInterest) * 100).toFixed(2))
+}
+
+const parsePayoutMode = (value) => {
+  const normalizedValue = normalizeText(value)
+
+  if (!normalizedValue) {
+    return 'on-maturity'
+  }
+
+  if (['on-maturity', 'on maturity', 'on maturity only'].includes(normalizedValue)) {
+    return 'on-maturity'
+  }
+
+  if (['quarterly-fy', 'quarterly', 'quarterly fy'].includes(normalizedValue)) {
+    return 'quarterly-fy'
+  }
+
+  if (['yearly-fixed', 'yearly fixed', 'yearly on fixed date'].includes(normalizedValue)) {
+    return 'yearly-fixed'
+  }
+
+  return null
+}
+
+const parseStatusValue = (value) => {
+  const normalizedValue = normalizeText(value)
+
+  if (normalizedValue === 'open') {
+    return 'Open'
+  }
+
+  if (normalizedValue === 'closed') {
+    return 'Closed'
+  }
+
+  return null
+}
+
+const getEffectivePayoutMode = ({ instrumentType, payoutMode }) => {
+  if (instrumentType === 'SCSS') {
+    return 'quarterly-fy'
+  }
+
+  return payoutMode || 'on-maturity'
+}
+
+const normalizeImportRowText = (row, column) => String(row?.[column] || '').trim()
+
+const buildInvestmentIdentityKey = ({
+  holderName,
+  bankName,
+  accountNumber,
+  investmentDate,
+}) =>
+  [
+    normalizeText(holderName),
+    normalizeText(bankName),
+    normalizeText(accountNumber),
+    String(investmentDate || '').trim(),
+  ].join('|')
+
 const parseCookies = (request) =>
   String(request.headers.cookie || '')
     .split(';')
@@ -337,6 +542,339 @@ const buildHealthPayload = () => {
       portfolioShares: 'portfolioShares',
       auditLogs: 'auditLogs',
     },
+  }
+}
+
+const parseImportWorkbook = (buffer) => {
+  const workbook = XLSX.read(buffer, {
+    type: 'buffer',
+    cellDates: true,
+  })
+
+  const worksheet = workbook.Sheets[INVESTMENT_IMPORT_SHEET_NAME]
+  if (!worksheet) {
+    throw new Error(`Workbook must contain a sheet named "${INVESTMENT_IMPORT_SHEET_NAME}"`)
+  }
+
+  const rows = XLSX.utils.sheet_to_json(worksheet, {
+    defval: '',
+    raw: true,
+  })
+
+  return {
+    worksheet,
+    rows,
+  }
+}
+
+const mergeMasterDataForImport = (masterData, additions) => {
+  const nextOwners = [...(masterData.owners || [])]
+  const ownerLookup = new Set(nextOwners.map((owner) => normalizeText(owner.name)))
+
+  additions.owners.forEach((ownerName) => {
+    const normalizedOwnerName = normalizeText(ownerName)
+    if (!normalizedOwnerName || ownerLookup.has(normalizedOwnerName)) {
+      return
+    }
+
+    ownerLookup.add(normalizedOwnerName)
+    nextOwners.push({
+      id: createMasterId(ownerName),
+      name: ownerName,
+      aliases: [],
+    })
+  })
+
+  const nextInstrumentTypes = [...(masterData.instrumentTypes || [])]
+  const instrumentLookup = new Set(nextInstrumentTypes.map((item) => normalizeText(item.name)))
+
+  additions.instrumentTypes.forEach((instrumentType) => {
+    const normalizedInstrumentType = normalizeText(instrumentType)
+    if (!normalizedInstrumentType || instrumentLookup.has(normalizedInstrumentType)) {
+      return
+    }
+
+    instrumentLookup.add(normalizedInstrumentType)
+    nextInstrumentTypes.push({
+      id: createMasterId(instrumentType),
+      name: instrumentType,
+    })
+  })
+
+  const institutionMap = new Map(
+    (masterData.institutions || []).map((institution) => [
+      normalizeText(institution.name),
+      {
+        ...institution,
+        branches: [...(institution.branches || [])],
+      },
+    ]),
+  )
+
+  additions.institutions.forEach((institutionName) => {
+    const normalizedInstitutionName = normalizeText(institutionName)
+    if (!normalizedInstitutionName || institutionMap.has(normalizedInstitutionName)) {
+      return
+    }
+
+    institutionMap.set(normalizedInstitutionName, {
+      id: createMasterId(institutionName),
+      name: institutionName,
+      branches: [],
+    })
+  })
+
+  additions.branches.forEach(({ institutionName, branchName }) => {
+    const normalizedInstitutionName = normalizeText(institutionName)
+    const normalizedBranchName = normalizeText(branchName)
+    if (!normalizedInstitutionName || !normalizedBranchName) {
+      return
+    }
+
+    const institution =
+      institutionMap.get(normalizedInstitutionName) ||
+      {
+        id: createMasterId(institutionName),
+        name: institutionName,
+        branches: [],
+      }
+    const branchLookup = new Set((institution.branches || []).map((branch) => normalizeText(branch.name)))
+
+    if (!branchLookup.has(normalizedBranchName)) {
+      institution.branches.push({
+        id: createMasterId(branchName),
+        name: branchName,
+      })
+    }
+
+    institutionMap.set(normalizedInstitutionName, institution)
+  })
+
+  return normalizeMasterData({
+    owners: nextOwners,
+    institutions: Array.from(institutionMap.values()),
+    instrumentTypes: nextInstrumentTypes,
+  })
+}
+
+const buildImportMasterChanges = (rows, masterData) => {
+  const ownerLookup = new Set((masterData.owners || []).map((owner) => normalizeText(owner.name)))
+  const instrumentLookup = new Set(
+    (masterData.instrumentTypes || []).map((instrumentType) => normalizeText(instrumentType.name)),
+  )
+  const institutionLookup = new Map(
+    (masterData.institutions || []).map((institution) => [
+      normalizeText(institution.name),
+      new Set((institution.branches || []).map((branch) => normalizeText(branch.name))),
+    ]),
+  )
+
+  const owners = new Set()
+  const instrumentTypes = new Set()
+  const institutions = new Set()
+  const branchMap = new Map()
+
+  rows.forEach((row) => {
+    ;[row.holderName, row.fundingSource].forEach((ownerName) => {
+      const normalizedOwnerName = normalizeText(ownerName)
+      if (normalizedOwnerName && !ownerLookup.has(normalizedOwnerName)) {
+        owners.add(ownerName)
+      }
+    })
+
+    const normalizedInstrumentType = normalizeText(row.instrumentType)
+    if (normalizedInstrumentType && !instrumentLookup.has(normalizedInstrumentType)) {
+      instrumentTypes.add(row.instrumentType)
+    }
+
+    const normalizedInstitutionName = normalizeText(row.bankName)
+    if (normalizedInstitutionName) {
+      if (!institutionLookup.has(normalizedInstitutionName)) {
+        institutions.add(row.bankName)
+      }
+
+      const existingBranches = institutionLookup.get(normalizedInstitutionName) || new Set()
+      const normalizedBranchName = normalizeText(row.branchCity)
+      if (normalizedBranchName && !existingBranches.has(normalizedBranchName)) {
+        const existingValues = branchMap.get(normalizedInstitutionName) || []
+        if (!existingValues.some((branchName) => normalizeText(branchName) === normalizedBranchName)) {
+          branchMap.set(normalizedInstitutionName, [...existingValues, row.branchCity])
+        }
+      }
+    }
+  })
+
+  return {
+    owners: Array.from(owners).sort((left, right) => left.localeCompare(right)),
+    instrumentTypes: Array.from(instrumentTypes).sort((left, right) => left.localeCompare(right)),
+    institutions: Array.from(institutions).sort((left, right) => left.localeCompare(right)),
+    branches: Array.from(branchMap.entries())
+      .flatMap(([institutionKey, branches]) =>
+        branches.map((branchName) => ({
+          institutionName:
+            rows.find((row) => normalizeText(row.bankName) === institutionKey)?.bankName || institutionKey,
+          branchName,
+        })),
+      ),
+  }
+}
+
+const validateAndNormalizeImportRows = ({ rows, existingDeposits }) => {
+  const missingHeaders = INVESTMENT_IMPORT_REQUIRED_COLUMNS.filter(
+    (column) => !rows.every((row) => Object.prototype.hasOwnProperty.call(row, column)),
+  )
+
+  if (rows.length === 0) {
+    return {
+      rows: [],
+      errors: ['Workbook does not contain any investment rows.'],
+      missingHeaders,
+      validRows: [],
+    }
+  }
+
+  const existingKeys = new Set(existingDeposits.map(buildInvestmentIdentityKey))
+  const seenKeys = new Map()
+  const results = rows.map((row, index) => {
+    const rowNumber = index + 2
+    const errors = []
+
+    const holderName = normalizeImportRowText(row, 'Holder')
+    const bankName = normalizeImportRowText(row, 'Bank or Issuer')
+    const accountNumber = normalizeImportRowText(row, 'Account or Certificate No')
+    const instrumentType = normalizeImportRowText(row, 'Instrument Type')
+    const principalAmount = parseNumber(row['Principal Amount'])
+    const investmentDate = normalizeImportDate(row['Investment Date'])
+    const maturityDate = normalizeImportDate(row['Maturity Date'])
+    const status = parseStatusValue(row.Status)
+    const fundingSource = normalizeImportRowText(row, 'Funding Source') || holderName
+    const branchCity = normalizeImportRowText(row, 'Branch City')
+    const payoutMode = parsePayoutMode(row['Payout Mode'])
+    const yearlyPayoutMonthDay = normalizeImportRowText(row, 'Interest Payment Date')
+    const interestPayoutBeforeTds = parseNumber(row['Interest Paid Before TDS'])
+    const interestPayoutAfterTds = parseNumber(row['Amount Received Each Payout'])
+    const interestRate = parseNumber(row['Interest Rate %'])
+    const maturityBeforeTax = parseNumber(row['Amount at Maturity Before TDS'])
+    const maturityAfterTax = parseNumber(row['Amount Received at Maturity'])
+    const notes = normalizeImportRowText(row, 'Notes')
+
+    if (!holderName) {
+      errors.push('Holder is required.')
+    }
+    if (!bankName) {
+      errors.push('Bank or Issuer is required.')
+    }
+    if (!accountNumber) {
+      errors.push('Account or Certificate No is required.')
+    }
+    if (!instrumentType) {
+      errors.push('Instrument Type is required.')
+    }
+    if (principalAmount === '' || Number(principalAmount) <= 0) {
+      errors.push('Principal Amount must be a positive number.')
+    }
+    if (!investmentDate) {
+      errors.push('Investment Date is required and must be a valid date.')
+    }
+    if (!maturityDate) {
+      errors.push('Maturity Date is required and must be a valid date.')
+    }
+    if (!status) {
+      errors.push('Status must be Open or Closed.')
+    }
+    if (!payoutMode) {
+      errors.push('Payout Mode must be on-maturity, quarterly-fy, or yearly-fixed when provided.')
+    }
+
+    const effectivePayoutMode = getEffectivePayoutMode({
+      instrumentType,
+      payoutMode,
+    })
+
+    if (
+      investmentDate &&
+      maturityDate &&
+      new Date(`${maturityDate}T00:00:00`) < new Date(`${investmentDate}T00:00:00`)
+    ) {
+      errors.push('Maturity Date must be on or after Investment Date.')
+    }
+
+    if (status === 'Closed' && maturityAfterTax === '') {
+      errors.push('Amount Received at Maturity is required when Status is Closed.')
+    }
+
+    if (effectivePayoutMode !== 'on-maturity' && interestPayoutAfterTds === '') {
+      errors.push('Amount Received Each Payout is required for periodic payout products.')
+    }
+
+    if (effectivePayoutMode === 'yearly-fixed' && !/^\d{2}-\d{2}$/.test(yearlyPayoutMonthDay)) {
+      errors.push('Interest Payment Date is required for yearly-fixed payout mode and must use MM-DD.')
+    }
+
+    const identityKey = buildInvestmentIdentityKey({
+      holderName,
+      bankName,
+      accountNumber,
+      investmentDate,
+    })
+
+    if (seenKeys.has(identityKey)) {
+      errors.push(`This row duplicates row ${seenKeys.get(identityKey)} in the file.`)
+    } else if (holderName && bankName && accountNumber && investmentDate) {
+      seenKeys.set(identityKey, rowNumber)
+    }
+
+    if (existingKeys.has(identityKey)) {
+      errors.push('This investment already exists in the selected portfolio.')
+    }
+
+    const tenure = deriveTenureParts(investmentDate, maturityDate)
+    const tdsAmount = computeTdsAmount(maturityBeforeTax, maturityAfterTax)
+    const tdsPercent = computeTdsPercent(principalAmount, maturityBeforeTax, maturityAfterTax)
+    const totalInterestEarned =
+      maturityAfterTax !== '' && principalAmount !== ''
+        ? Math.max(Number(maturityAfterTax) - Number(principalAmount), 0)
+        : 0
+
+    return {
+      rowNumber,
+      source: row,
+      errors,
+      normalized: {
+        holderName,
+        bankName,
+        accountNumber,
+        instrumentType,
+        principalAmount,
+        investmentDate,
+        maturityDate,
+        status: status || '',
+        fundingSource,
+        branchCity,
+        payoutMode: payoutMode || '',
+        effectivePayoutMode,
+        yearlyPayoutMonthDay,
+        interestPayoutBeforeTds,
+        interestPayoutAfterTds,
+        interestRate,
+        maturityBeforeTax,
+        maturityAfterTax,
+        notes,
+        tenureYears: tenure.years,
+        tenureMonths: tenure.months,
+        tenureDays: tenure.days,
+        totalInterestEarned,
+        tdsAmount,
+        tdsPercent,
+      },
+    }
+  })
+
+  return {
+    rows: results,
+    errors: missingHeaders.map((column) => `Workbook header is missing required column "${column}".`),
+    missingHeaders,
+    validRows: results.filter((row) => row.errors.length === 0).map((row) => row.normalized),
   }
 }
 
@@ -576,8 +1114,8 @@ const requireUserRole = (request, response, next) => {
   next()
 }
 
-const getMasterData = async (ownerUserId, { createIfMissing = false } = {}) => {
-  const existing = await MasterData.findOne({ ownerUserId }).lean()
+const getMasterData = async (ownerUserId, { createIfMissing = false, session } = {}) => {
+  const existing = await MasterData.findOne({ ownerUserId }).session(session || null).lean()
   if (existing) {
     return normalizeMasterData(existing)
   }
@@ -586,10 +1124,15 @@ const getMasterData = async (ownerUserId, { createIfMissing = false } = {}) => {
     return normalizeMasterData(emptyMasterData)
   }
 
-  const created = await MasterData.create({
-    ownerUserId,
-    ...emptyMasterData,
-  })
+  const [created] = await MasterData.create(
+    [
+      {
+        ownerUserId,
+        ...emptyMasterData,
+      },
+    ],
+    { session },
+  )
   return normalizeMasterData(created.toObject())
 }
 
@@ -602,23 +1145,29 @@ const writeAdminAuditLog = async ({
   before = null,
   after = null,
   metadata = null,
+  session = null,
 }) => {
   if (actor?.systemRole !== 'admin') {
     return
   }
 
-  await YieldflowAuditLog.create({
-    actorUserId: actor.id,
-    actorEmail: actor.email,
-    actorRole: actor.systemRole,
-    action,
-    targetType,
-    targetRecordId,
-    targetOwnerUserId,
-    before,
-    after,
-    metadata,
-  })
+  await YieldflowAuditLog.create(
+    [
+      {
+        actorUserId: actor.id,
+        actorEmail: actor.email,
+        actorRole: actor.systemRole,
+        action,
+        targetType,
+        targetRecordId,
+        targetOwnerUserId,
+        before,
+        after,
+        metadata,
+      },
+    ],
+    session ? { session } : undefined,
+  )
 }
 
 const getFundingEventMatcherForDeposit = (depositId) => {
@@ -870,6 +1419,180 @@ app.delete('/api/shares/:id', requireAuth, requireUserRole, async (request, resp
 
   response.json({ ok: true })
 })
+
+app.post(
+  '/api/investment-import',
+  requireAuth,
+  resolvePortfolioContext,
+  requirePortfolioWriteAccess,
+  importUpload.single('file'),
+  async (request, response) => {
+    if (!request.file?.buffer) {
+      response.status(400).json({ message: 'Upload an .xlsx file in the "file" field.' })
+      return
+    }
+
+    if (!request.file.originalname?.toLowerCase().endsWith('.xlsx')) {
+      response.status(400).json({ message: 'Only .xlsx files are supported.' })
+      return
+    }
+
+    const dryRun = String(request.query.dryRun || 'true').trim().toLowerCase() !== 'false'
+    let rows
+
+    try {
+      rows = parseImportWorkbook(request.file.buffer).rows
+    } catch (error) {
+      response.status(400).json({ message: error.message })
+      return
+    }
+    const existingDeposits = (
+      await Deposit.find({ ownerUserId: request.portfolioContext.ownerUserId }).lean()
+    ).map(normalizeDepositDoc)
+    const validation = validateAndNormalizeImportRows({
+      rows,
+      existingDeposits,
+    })
+    const masterData = await getMasterData(request.portfolioContext.ownerUserId, {
+      createIfMissing: request.portfolioContext.isOwner || request.sessionUser.systemRole === 'admin',
+    })
+    const masterChanges = buildImportMasterChanges(validation.validRows, masterData)
+    const rowErrors = [
+      ...validation.errors.map((message) => ({
+        rowNumber: null,
+        messages: [message],
+      })),
+      ...validation.rows
+        .filter((row) => row.errors.length > 0)
+        .map((row) => ({
+          rowNumber: row.rowNumber,
+          messages: row.errors,
+        })),
+    ]
+
+    const previewPayload = {
+      dryRun,
+      parsedRowCount: rows.length,
+      validRowCount: validation.validRows.length,
+      hasErrors: rowErrors.length > 0,
+      rowErrors,
+      previewRows: validation.rows.map((row) => ({
+        rowNumber: row.rowNumber,
+        errors: row.errors,
+        investment: row.normalized,
+      })),
+      masterChanges,
+    }
+
+    if (dryRun) {
+      response.json(previewPayload)
+      return
+    }
+
+    if (rowErrors.length > 0) {
+      response.status(422).json(previewPayload)
+      return
+    }
+
+    const highestSrNo = existingDeposits.reduce((max, deposit) => {
+      const srNo = Number(deposit.srNo)
+      return Number.isFinite(srNo) ? Math.max(max, srNo) : max
+    }, 0)
+
+    const session = await mongoose.startSession()
+
+    try {
+      let createdCount = 0
+
+      await session.withTransaction(async () => {
+        const nextMasterData = mergeMasterDataForImport(masterData, masterChanges)
+
+        await MasterData.findOneAndUpdate(
+          { ownerUserId: request.portfolioContext.ownerUserId },
+          {
+            ownerUserId: request.portfolioContext.ownerUserId,
+            ...nextMasterData,
+          },
+          { new: true, upsert: true, setDefaultsOnInsert: true, session },
+        ).lean()
+
+        const investmentDocuments = validation.validRows.map((row, index) => ({
+          id: `fd-${Date.now()}-${crypto.randomBytes(3).toString('hex')}-${index}`,
+          srNo: highestSrNo + index + 1,
+          bankName: row.bankName,
+          branchCity: row.branchCity,
+          holderName: row.holderName,
+          fundingSource: row.fundingSource,
+          instrumentType: row.instrumentType,
+          payoutMode: row.payoutMode,
+          yearlyPayoutMonthDay: row.yearlyPayoutMonthDay,
+          interestPayoutBeforeTds: row.interestPayoutBeforeTds,
+          interestPayoutAfterTds: row.interestPayoutAfterTds,
+          accountNumber: row.accountNumber,
+          tenureYears: row.tenureYears,
+          tenureMonths: row.tenureMonths,
+          tenureDays: row.tenureDays,
+          interestRate: row.interestRate,
+          principalAmount: row.principalAmount,
+          investmentDate: row.investmentDate,
+          maturityDate: row.maturityDate,
+          maturityBeforeTax: row.maturityBeforeTax,
+          maturityAfterTax: row.maturityAfterTax,
+          totalInterestEarned: row.totalInterestEarned,
+          tdsPercent: row.tdsPercent,
+          tdsAmount: row.tdsAmount,
+          status: row.status,
+          allocations: [],
+          notes: row.notes,
+          ownerUserId: request.portfolioContext.ownerUserId,
+          createdByUserId: request.sessionUser.id,
+          updatedByUserId: request.sessionUser.id,
+          isDeleted: false,
+        }))
+
+        const created = await Deposit.create(investmentDocuments, { session, ordered: true })
+        createdCount = created.length
+
+        if (request.sessionUser.systemRole === 'admin') {
+          await writeAdminAuditLog({
+            actor: request.sessionUser,
+            action: 'admin.masterData.bulkCreate',
+            targetType: 'masterData',
+            targetRecordId: request.portfolioContext.ownerUserId,
+            targetOwnerUserId: request.portfolioContext.ownerUserId,
+            after: nextMasterData,
+            metadata: {
+              createdValues: masterChanges,
+            },
+            session,
+          })
+
+          await writeAdminAuditLog({
+            actor: request.sessionUser,
+            action: 'admin.investment.bulkImport',
+            targetType: 'investment',
+            targetRecordId: '',
+            targetOwnerUserId: request.portfolioContext.ownerUserId,
+            metadata: {
+              importedCount: created.length,
+              createdValues: masterChanges,
+              fileName: request.file.originalname,
+            },
+            session,
+          })
+        }
+      })
+
+      response.json({
+        importedCount: createdCount,
+        masterChanges,
+        message: `${createdCount} investments imported successfully.`,
+      })
+    } finally {
+      await session.endSession()
+    }
+  },
+)
 
 app.get('/api/deposits', requireAuth, resolvePortfolioContext, async (request, response) => {
   const deposits = await Deposit.find({ ownerUserId: request.portfolioContext.ownerUserId }).lean()

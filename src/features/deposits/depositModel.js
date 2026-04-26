@@ -364,6 +364,7 @@ export const createInterestEvent = (deposit, date) => {
     grossAmount,
     holderName: deposit.holderName,
     bankName: deposit.bankName,
+    accountNumber: deposit.accountNumber,
     sourceLabel: `${deposit.instrumentType} interest`,
     title: `${deposit.bankName} interest credit`,
   }
@@ -467,11 +468,12 @@ export const requestJson = async (url, options = {}) => {
     apiBaseUrl && normalizedUrl.startsWith('/')
       ? `${apiBaseUrl}${normalizedUrl}`
       : normalizedUrl
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData
 
   const response = await fetch(requestUrl, {
     credentials: 'include',
     headers: {
-      'Content-Type': 'application/json',
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       ...(options.headers || {}),
     },
     ...options,

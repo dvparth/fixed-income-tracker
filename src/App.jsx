@@ -39,6 +39,14 @@ const buildOwnerScopedPath = (path, ownerUserId) => {
   return `${path}${separator}ownerUserId=${encodeURIComponent(ownerUserId)}`
 }
 
+const formatEditableNumber = (value, precision = 4) => {
+  if (value === '' || value === null || value === undefined || Number.isNaN(Number(value))) {
+    return ''
+  }
+
+  return Number(Number(value).toFixed(precision)).toString()
+}
+
 function App() {
   const [sessionState, setSessionState] = useState(createEmptySessionState)
   const [isAuthenticating, setIsAuthenticating] = useState(false)
@@ -83,6 +91,7 @@ function App() {
   const [isDeleting, setIsDeleting] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
+  const [portfolioReloadSeed, setPortfolioReloadSeed] = useState(0)
   const [interestFocusMode, setInterestFocusMode] = useState('all')
   const [maturityFocusMode, setMaturityFocusMode] = useState('all')
   const [isSavingMasters, setIsSavingMasters] = useState(false)
@@ -203,7 +212,7 @@ function App() {
     return () => {
       isMounted = false
     }
-  }, [activePortfolioOwnerId, sessionState.authenticated])
+  }, [activePortfolioOwnerId, portfolioReloadSeed, sessionState.authenticated])
 
   useEffect(() => {
     if (!sessionState.authenticated) {
@@ -273,6 +282,7 @@ function App() {
           grossAmount: Number(deposit.maturityBeforeTax || postTdsAmount),
           holderName: deposit.holderName,
           bankName: deposit.bankName,
+          accountNumber: deposit.accountNumber,
           sourceLabel: 'Post-TDS maturity pool',
           title: `${deposit.bankName} maturity`,
         })
@@ -462,7 +472,10 @@ function App() {
       0,
     )
     const maturedWithPostTds = cashFlowEvents.filter(
-      (event) => event.type === 'Maturity' && isWithinCurrentFy(event.date),
+      (event) =>
+        event.type === 'Maturity' &&
+        new Date(event.date) <= TODAY &&
+        isWithinCurrentFy(event.date),
     )
     const uninvestedMaturityCash = maturedWithPostTds.reduce((sum, event) => {
       const allocated = (allocationMap.get(event.eventId) ?? []).reduce(
@@ -535,6 +548,7 @@ function App() {
           depositId: event.depositId,
           bankName: event.bankName,
           holderName: event.holderName,
+          accountNumber: event.accountNumber,
           pendingAmount: event.unallocatedAmount,
           receiptCount: 1,
           oldestPendingDate: event.date,
@@ -545,6 +559,33 @@ function App() {
 
     const upcomingInterestEvents = cashFlowEvents
       .filter((event) => event.type === 'Interest' && new Date(event.date) >= addDays(TODAY, -1))
+      .slice(0, 4)
+    const upcomingInterestSummary = Array.from(
+      futureInterestEvents.reduce((map, event) => {
+        const current = map.get(event.depositId)
+        if (current) {
+          current.futureAmount += Number(event.amount || 0)
+          current.receiptCount += 1
+          if (new Date(event.date) < new Date(current.nextPaymentDate)) {
+            current.nextPaymentDate = event.date
+          }
+          return map
+        }
+
+        map.set(event.depositId, {
+          depositId: event.depositId,
+          bankName: event.bankName,
+          holderName: event.holderName,
+          accountNumber: event.accountNumber,
+          futureAmount: Number(event.amount || 0),
+          receiptCount: 1,
+          nextPaymentDate: event.date,
+          type: event.type,
+        })
+        return map
+      }, new Map()).values(),
+    )
+      .sort((left, right) => new Date(left.nextPaymentDate) - new Date(right.nextPaymentDate))
       .slice(0, 4)
 
     const ownerSummary = Array.from(
@@ -609,6 +650,7 @@ function App() {
       dueInterestAwaitingReinvestment,
       dueInterestAwaitingReinvestmentSummary,
       upcomingInterestEvents,
+      upcomingInterestSummary,
       missingPeriodicPayoutDeposits,
       ownerSummary,
       currentFinancialYearLabel: selectedFinancialYearRange.label,
@@ -738,7 +780,7 @@ function App() {
       tenureYears: deposit.tenureYears ?? '',
       tenureMonths: deposit.tenureMonths ?? '',
       tenureDays: deposit.tenureDays ?? '',
-      interestRate: deposit.interestRate ?? '',
+      interestRate: formatEditableNumber(deposit.interestRate),
       principalAmount: deposit.principalAmount ?? '',
       investmentDate: deposit.investmentDate ?? '',
       maturityDate: deposit.maturityDate ?? '',
@@ -784,7 +826,7 @@ function App() {
       tenureYears: deposit.tenureYears ?? '',
       tenureMonths: deposit.tenureMonths ?? '',
       tenureDays: deposit.tenureDays ?? '',
-      interestRate: deposit.interestRate ?? '',
+      interestRate: formatEditableNumber(deposit.interestRate),
       principalAmount: deposit.principalAmount ?? '',
       investmentDate: '',
       maturityDate: '',
@@ -1633,6 +1675,35 @@ function App() {
     }
   }
 
+  const scrollToDashboardSection = (sectionId) => {
+    globalThis.setTimeout(() => {
+      const element = globalThis.document?.getElementById(sectionId)
+      element?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+    }, 0)
+  }
+
+  const showMaturityDrilldown = () => {
+    setMaturityFocusMode('pending')
+    scrollToDashboardSection('dashboard-maturity-section')
+  }
+
+  const showUnusedInterestDrilldown = () => {
+    setInterestFocusMode('pending')
+    scrollToDashboardSection('dashboard-interest-section')
+  }
+
+  const showUpcomingInterestDrilldown = () => {
+    setInterestFocusMode('all')
+    scrollToDashboardSection('dashboard-interest-section')
+  }
+
+  const handleBulkImportSuccess = async () => {
+    setPortfolioReloadSeed((current) => current + 1)
+  }
+
   const desktopTabs = [
     ['dashboard', 'Dashboard'],
     ['deposits', 'Deposits'],
@@ -1953,33 +2024,33 @@ function App() {
                 <strong>{formatCurrency(stats.realisedInterest)}</strong>
                 <small>FY {stats.currentFinancialYearLabel}</small>
               </article>
-              <article className="stat-card">
+              <button type="button" className="stat-card stat-card-action" onClick={showMaturityDrilldown}>
                 <span className="stat-label-row">
                   <span>Unused maturity cash</span>
                   {renderHelpHint('unused-maturity-cash', 'This is maturity money already received but not yet used in a new investment.')}
                 </span>
                 <strong>{formatCurrency(stats.uninvestedMaturityCash)}</strong>
-                <small>FY {stats.currentFinancialYearLabel}</small>
-              </article>
-              <article className="stat-card warning">
+                <small>FY {stats.currentFinancialYearLabel} | View investments</small>
+              </button>
+              <button type="button" className="stat-card stat-card-action warning" onClick={showUnusedInterestDrilldown}>
                 <span className="stat-label-row">
                   <span>Interest not reused</span>
                   {renderHelpHint('interest-not-reused', 'This is interest already received but still sitting unused.')}
                 </span>
                 <strong>{formatCurrency(stats.uninvestedInterestCash)}</strong>
-                <small>FY {stats.currentFinancialYearLabel}</small>
-              </article>
-              <article className="stat-card">
+                <small>FY {stats.currentFinancialYearLabel} | View investments</small>
+              </button>
+              <button type="button" className="stat-card stat-card-action" onClick={showUpcomingInterestDrilldown}>
                 <span className="stat-label-row">
                   <span>Upcoming interest</span>
                   {renderHelpHint('upcoming-interest', 'This only shows future interest for deposits that pay interest before maturity, like quarterly or yearly payout products.')}
                 </span>
                 <strong>{formatCurrency(stats.futureInterestCash)}</strong>
-                <small>FY {stats.currentFinancialYearLabel}</small>
-              </article>
+                <small>FY {stats.currentFinancialYearLabel} | View schedule</small>
+              </button>
             </div>
 
-            <article className="panel">
+            <article id="dashboard-maturity-section" className="panel">
               <div className="section-head">
                 <div>
                   <div className="section-title-row">
@@ -2029,7 +2100,10 @@ function App() {
                       </span>
                     </div>
                     <p>
-                      {deposit.holderName} | {deposit.instrumentType || 'Maturity'}
+                      {deposit.holderName} | {deposit.accountNumber || 'No account no.'}
+                    </p>
+                    <p>
+                      {deposit.instrumentType || 'Maturity'}
                     </p>
                     <p>
                       {maturityFocusMode === 'pending'
@@ -2041,7 +2115,7 @@ function App() {
               </div>
             </article>
 
-            <article className="panel">
+            <article id="dashboard-interest-section" className="panel">
               <div className="section-head">
                 <div>
                   <div className="section-title-row">
@@ -2074,14 +2148,14 @@ function App() {
               <div className="list">
                 {(interestFocusMode === 'pending'
                   ? stats.dueInterestAwaitingReinvestmentSummary
-                  : stats.upcomingInterestEvents
+                  : stats.upcomingInterestSummary
                 ).length > 0 ? (
                   (interestFocusMode === 'pending'
                     ? stats.dueInterestAwaitingReinvestmentSummary
-                    : stats.upcomingInterestEvents
+                    : stats.upcomingInterestSummary
                   ).map((event) => (
                     <button
-                      key={interestFocusMode === 'pending' ? event.depositId : event.eventId}
+                      key={event.depositId}
                       type="button"
                       className="deposit-card"
                       onClick={() => openDepositFromInterestEvent(event)}
@@ -2093,15 +2167,17 @@ function App() {
                         </span>
                       </div>
                       <p>
-                        {event.holderName} |{' '}
+                        {event.holderName} | {event.accountNumber || 'No account no.'}
+                      </p>
+                      <p>
                         {formatCurrency(
-                          interestFocusMode === 'pending' ? event.pendingAmount : event.amount,
+                          interestFocusMode === 'pending' ? event.pendingAmount : event.futureAmount,
                         )}
                       </p>
                       <p>
                         {interestFocusMode === 'pending'
                           ? `${event.receiptCount} received interest receipts pending`
-                          : formatDate(event.date)}
+                          : `${event.receiptCount} upcoming payout${event.receiptCount === 1 ? '' : 's'} | ${formatDate(event.nextPaymentDate)}`}
                       </p>
                       {interestFocusMode === 'pending' && (
                         <p className="inline-warning">
@@ -2166,6 +2242,9 @@ function App() {
         <DepositsView
           isMobile={isMobile}
           isReadOnly={isReadOnlyPortfolio}
+          ownerUserId={activePortfolioOwnerId}
+          activePortfolioLabel={activePortfolioLabel}
+          onImportSuccess={handleBulkImportSuccess}
           mobileDepositsScreen={mobileDepositsScreen}
           isMobileFiltersOpen={isMobileFiltersOpen}
           setIsMobileFiltersOpen={setIsMobileFiltersOpen}
