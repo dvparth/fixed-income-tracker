@@ -1231,7 +1231,7 @@ function App() {
   )
 
   return (
-    <div className="shell">
+    <div className="shell theme-midnight-navy">
       {showMobileAppHeader && (
         <header className="app-topbar">
           <div className="app-topbar-copy">
