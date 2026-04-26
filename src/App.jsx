@@ -1,8 +1,10 @@
 import { startTransition, useDeferredValue, useEffect, useMemo, useState } from 'react'
 import './App.css'
+import AdminView from './features/admin/AdminView.jsx'
 import DepositsView from './features/deposits/DepositsView.jsx'
 import DepositEditorView from './features/editor/DepositEditorView.jsx'
 import MastersView from './features/masters/MastersView.jsx'
+import { downloadInvestmentsWorkbook } from './features/admin/exportWorkbook.js'
 import { TODAY, addDays, computeTdsAmount, computeTdsPercent, deriveTenureParts, emptyForm, formatAllocationsText, formatCurrency, formatDate, formatTenure, generateInterestEvents, getCurrentFinancialYearRange, getDateSortValue, getEffectivePayoutMode, getFinancialYearLabelFromDate, getFinancialYearRangeFromLabel, getFundingAllocations, getHolderSearchTokens, getMaturitySourceEventId, getPayoutModeLabel, getPostTdsAmount, hydrateDeposit, needsPeriodicPayoutSetup, normalizeDeposit, parseAllocationEntries, requestJson, toYmd } from './features/deposits/depositModel.js'
 import { buildOwnerAliasLookup, emptyMasterData, normalizeMasterData } from '../shared/masterData.js'
 
@@ -1165,6 +1167,7 @@ function App() {
   const isMobileEditorScreen = isMobile && activeTab === 'editor'
   const mobileEditorTitle = editingId ? 'Edit deposit' : 'Add deposit'
   const mobileMastersTitle = 'Masters'
+  const mobileAdminTitle = 'Admin'
   const hasActiveDepositFilters = searchScope !== 'all' || searchText.trim() !== '' || !showClosed
   const mobileCompactHeaderTitle =
     activeTab === 'dashboard'
@@ -1173,7 +1176,9 @@ function App() {
         ? 'Deposits'
         : activeTab === 'masters'
           ? mobileMastersTitle
-          : mobileEditorTitle
+          : activeTab === 'admin'
+            ? mobileAdminTitle
+            : mobileEditorTitle
   const mobileFilterBadges = [
     searchScope !== 'all' ? `Scope: ${searchScope === 'holder'
       ? 'Holder'
@@ -1230,6 +1235,18 @@ function App() {
     </span>
   )
 
+  const openAdmin = () => {
+    setActiveTab('admin')
+    setIsMobileNavOpen(false)
+  }
+
+  const handleDownloadWorkbook = () => {
+    downloadInvestmentsWorkbook({
+      deposits,
+      allocationMap,
+    })
+  }
+
   return (
     <div className="shell theme-midnight-navy">
       {showAppHeader && (
@@ -1238,19 +1255,28 @@ function App() {
             <strong className="app-topbar-title">YieldFlow</strong>
             <span className="app-topbar-subtitle">{mobileCompactHeaderTitle}</span>
           </div>
-          <button
-            type="button"
-            className={activeTab === 'masters' ? 'icon-btn active' : 'icon-btn'}
-            onClick={() => {
-              setActiveTab('masters')
-              setIsMobileNavOpen(false)
-            }}
-            aria-label="Open masters"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 8.75a3.25 3.25 0 1 0 0 6.5a3.25 3.25 0 0 0 0-6.5Zm8.25 3.25l-1.54-.53a6.72 6.72 0 0 0-.52-1.24l.73-1.46a.9.9 0 0 0-.17-1.04l-1.48-1.48a.9.9 0 0 0-1.04-.17l-1.46.73c-.4-.21-.82-.38-1.24-.52l-.53-1.54a.9.9 0 0 0-.85-.6h-2.1a.9.9 0 0 0-.85.6l-.53 1.54c-.42.14-.84.31-1.24.52l-1.46-.73a.9.9 0 0 0-1.04.17L5.25 7.73a.9.9 0 0 0-.17 1.04l.73 1.46c-.21.4-.38.82-.52 1.24l-1.54.53a.9.9 0 0 0-.6.85v2.1c0 .39.25.73.6.85l1.54.53c.14.42.31.84.52 1.24l-.73 1.46a.9.9 0 0 0 .17 1.04l1.48 1.48c.28.28.7.35 1.04.17l1.46-.73c.4.21.82.38 1.24.52l.53 1.54c.12.35.46.6.85.6h2.1c.39 0 .73-.25.85-.6l.53-1.54c.42-.14.84-.31 1.24-.52l1.46.73c.34.18.76.11 1.04-.17l1.48-1.48a.9.9 0 0 0 .17-1.04l-.73-1.46c.21-.4.38-.82.52-1.24l1.54-.53c.35-.12.6-.46.6-.85v-2.1a.9.9 0 0 0-.6-.85Z" fill="currentColor" />
-            </svg>
-          </button>
+          <div className="app-topbar-actions">
+            <button
+              type="button"
+              className={activeTab === 'admin' ? 'secondary-btn compact active-topbar-btn' : 'secondary-btn compact'}
+              onClick={openAdmin}
+            >
+              Admin
+            </button>
+            <button
+              type="button"
+              className={activeTab === 'masters' ? 'icon-btn active' : 'icon-btn'}
+              onClick={() => {
+                setActiveTab('masters')
+                setIsMobileNavOpen(false)
+              }}
+              aria-label="Open masters"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 8.75a3.25 3.25 0 1 0 0 6.5a3.25 3.25 0 0 0 0-6.5Zm8.25 3.25l-1.54-.53a6.72 6.72 0 0 0-.52-1.24l.73-1.46a.9.9 0 0 0-.17-1.04l-1.48-1.48a.9.9 0 0 0-1.04-.17l-1.46.73c-.4-.21-.82-.38-1.24-.52l-.53-1.54a.9.9 0 0 0-.85-.6h-2.1a.9.9 0 0 0-.85.6l-.53 1.54c-.42.14-.84.31-1.24.52l-1.46-.73a.9.9 0 0 0-1.04.17L5.25 7.73a.9.9 0 0 0-.17 1.04l.73 1.46c-.21.4-.38.82-.52 1.24l-1.54.53a.9.9 0 0 0-.6.85v2.1c0 .39.25.73.6.85l1.54.53c.14.42.31.84.52 1.24l-.73 1.46a.9.9 0 0 0 .17 1.04l1.48 1.48c.28.28.7.35 1.04.17l1.46-.73c.4.21.82.38 1.24.52l.53 1.54c.12.35.46.6.85.6h2.1c.39 0 .73-.25.85-.6l.53-1.54c.42-.14.84-.31 1.24-.52l1.46.73c.34.18.76.11 1.04-.17l1.48-1.48a.9.9 0 0 0 .17-1.04l-.73-1.46c.21-.4.38-.82.52-1.24l1.54-.53c.35-.12.6-.46.6-.85v-2.1a.9.9 0 0 0-.6-.85Z" fill="currentColor" />
+              </svg>
+            </button>
+          </div>
         </header>
       )}
 
@@ -1307,6 +1333,7 @@ function App() {
             ['deposits', 'Deposits'],
             ['editor', editingId ? 'Edit' : 'Add'],
             ['masters', 'Masters'],
+            ['admin', 'Admin'],
           ].map(([value, label]) => (
             <button
               key={value}
@@ -1721,6 +1748,13 @@ function App() {
             setMastersReturnTarget(null)
           }}
           showReturnToEditor={mastersReturnTarget === 'editor'}
+        />
+      )}
+
+      {activeTab === 'admin' && (
+        <AdminView
+          totalInvestments={deposits.length}
+          onDownloadWorkbook={handleDownloadWorkbook}
         />
       )}
     </div>
