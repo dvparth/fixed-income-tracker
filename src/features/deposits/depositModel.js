@@ -271,6 +271,20 @@ export const getPostTdsAmount = (deposit) => {
 
 export const getMaturitySourceEventId = (depositId) => `maturity:${depositId}`
 
+export const getCashSettlements = (deposit) => {
+  if (!Array.isArray(deposit?.cashSettlements)) {
+    return []
+  }
+
+  return deposit.cashSettlements
+    .map((settlement) => ({
+      eventId: String(settlement?.eventId || '').trim(),
+      amount: Number(settlement?.amount || 0),
+      settledAt: settlement?.settledAt || '',
+    }))
+    .filter((settlement) => settlement.eventId && Number.isFinite(settlement.amount) && settlement.amount > 0)
+}
+
 export const hydrateDeposit = (deposit) => {
   const tenure = deriveTenureParts(deposit.investmentDate, deposit.maturityDate)
 
@@ -285,6 +299,7 @@ export const hydrateDeposit = (deposit) => {
       tenureMonths: tenure.months,
       tenureDays: tenure.days,
       allocations: [],
+      cashSettlements: [],
       isDeleted: false,
     },
     deposit,
@@ -298,6 +313,7 @@ export const hydrateDeposit = (deposit) => {
       tenureMonths: tenure.months,
       tenureDays: tenure.days,
       allocations: deposit.allocations || [],
+      cashSettlements: getCashSettlements(deposit),
       isDeleted: Boolean(deposit.isDeleted),
     },
   )
@@ -415,7 +431,7 @@ export const generateInterestEvents = (deposit) => {
   return events.sort((left, right) => new Date(left.date) - new Date(right.date))
 }
 
-export const normalizeDeposit = (formValues, existingId, fallbackSrNo) => {
+export const normalizeDeposit = (formValues, existingId, fallbackSrNo, existingDeposit = null) => {
   const holderName = formValues.holderName.trim()
   const maturityDate = formValues.maturityDate
   const principalAmount = parseNumber(formValues.principalAmount)
@@ -457,6 +473,7 @@ export const normalizeDeposit = (formValues, existingId, fallbackSrNo) => {
     tdsAmount: computedTdsAmount,
     status: formValues.status,
     allocations: parseAllocationEntries(formValues.allocationsText),
+    cashSettlements: getCashSettlements(existingDeposit),
     notes: formValues.notes.trim(),
   })
 }

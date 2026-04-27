@@ -7,7 +7,7 @@ import DepositEditorView from './features/editor/DepositEditorView.jsx'
 import MastersView from './features/masters/MastersView.jsx'
 import PortfolioAccessPanel from './features/sharing/PortfolioAccessPanel.jsx'
 import { downloadInvestmentsWorkbook } from './features/admin/exportWorkbook.js'
-import { TODAY, addDays, computeTdsAmount, computeTdsPercent, deriveTenureParts, emptyForm, formatAllocationsText, formatCurrency, formatDate, formatTenure, generateInterestEvents, getCurrentFinancialYearRange, getDateSortValue, getEffectivePayoutMode, getFinancialYearLabelFromDate, getFinancialYearRangeFromLabel, getFundingAllocations, getHolderSearchTokens, getMaturitySourceEventId, getPayoutModeLabel, getPostTdsAmount, hydrateDeposit, needsPeriodicPayoutSetup, normalizeDeposit, parseAllocationEntries, requestJson, toYmd } from './features/deposits/depositModel.js'
+import { TODAY, addDays, computeTdsAmount, computeTdsPercent, deriveTenureParts, emptyForm, formatAllocationsText, formatCurrency, formatDate, formatTenure, generateInterestEvents, getCashSettlements, getCurrentFinancialYearRange, getDateSortValue, getEffectivePayoutMode, getFinancialYearLabelFromDate, getFinancialYearRangeFromLabel, getFundingAllocations, getHolderSearchTokens, getMaturitySourceEventId, getPayoutModeLabel, getPostTdsAmount, hydrateDeposit, needsPeriodicPayoutSetup, normalizeDeposit, parseAllocationEntries, requestJson, toYmd } from './features/deposits/depositModel.js'
 import { buildOwnerAliasLookup, emptyMasterData, normalizeMasterData } from '../shared/masterData.js'
 
 const ADD_NEW_MASTER_VALUE = '__add_new_master__'
@@ -47,6 +47,47 @@ const formatEditableNumber = (value, precision = 4) => {
   return Number(Number(value).toFixed(precision)).toString()
 }
 
+const getSearchDateTokens = (value) => {
+  if (!value) {
+    return []
+  }
+
+  const date = new Date(`${value}T00:00:00`)
+  if (Number.isNaN(date.getTime())) {
+    return [String(value)]
+  }
+
+  const day = `${date.getDate()}`.padStart(2, '0')
+  const month = `${date.getMonth() + 1}`.padStart(2, '0')
+  const year = `${date.getFullYear()}`
+  const monthShort = date.toLocaleDateString('en-IN', { month: 'short' }).toLowerCase()
+
+  return [
+    value,
+    `${day}/${month}/${year}`,
+    `${day}-${month}-${year}`,
+    `${day} ${monthShort} ${year}`,
+    `${day} ${date.toLocaleDateString('en-IN', { month: 'long' }).toLowerCase()} ${year}`,
+  ]
+}
+
+const getDateFilterTime = (value, boundary = 'start') => {
+  if (!value) {
+    return null
+  }
+
+  const date = new Date(`${value}T00:00:00`)
+  if (Number.isNaN(date.getTime())) {
+    return null
+  }
+
+  if (boundary === 'end') {
+    date.setHours(23, 59, 59, 999)
+  }
+
+  return date.getTime()
+}
+
 function App() {
   const [sessionState, setSessionState] = useState(createEmptySessionState)
   const [isAuthenticating, setIsAuthenticating] = useState(false)
@@ -78,6 +119,10 @@ function App() {
   const [selectedId, setSelectedId] = useState(null)
   const [searchText, setSearchText] = useState('')
   const [searchScope, setSearchScope] = useState('all')
+  const [investmentDateFrom, setInvestmentDateFrom] = useState('')
+  const [investmentDateTo, setInvestmentDateTo] = useState('')
+  const [maturityDateFrom, setMaturityDateFrom] = useState('')
+  const [maturityDateTo, setMaturityDateTo] = useState('')
   const [showClosed, setShowClosed] = useState(true)
   const [editingId, setEditingId] = useState(null)
   const [formValues, setFormValues] = useState(emptyForm)
@@ -89,6 +134,7 @@ function App() {
   const [isArchiving, setIsArchiving] = useState(false)
   const [deleteTargetId, setDeleteTargetId] = useState(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [settlingEventId, setSettlingEventId] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [portfolioReloadSeed, setPortfolioReloadSeed] = useState(0)
@@ -114,6 +160,10 @@ function App() {
 
     return highestSrNo + 1
   }, [deposits])
+  const currentEditingDeposit = useMemo(
+    () => (editingId ? deposits.find((deposit) => deposit.id === editingId) ?? null : null),
+    [deposits, editingId],
+  )
 
   useEffect(() => {
     const loadSession = async () => {
@@ -327,6 +377,19 @@ function App() {
     [cashFlowEvents],
   )
 
+  const settlementMap = useMemo(() => {
+    const map = new Map()
+
+    activeDeposits.forEach((deposit) => {
+      getCashSettlements(deposit).forEach((settlement) => {
+        const current = map.get(settlement.eventId) ?? []
+        map.set(settlement.eventId, [...current, { deposit, ...settlement }])
+      })
+    })
+
+    return map
+  }, [activeDeposits])
+
   const allocationMap = useMemo(() => {
     const map = new Map()
 
@@ -343,16 +406,44 @@ function App() {
 
   const filteredDeposits = useMemo(() => {
     const query = deferredSearch.trim().toLowerCase()
+    const queryTerms = query.split(/\s+/).filter(Boolean)
+    const investmentFromTime = getDateFilterTime(investmentDateFrom, 'start')
+    const investmentToTime = getDateFilterTime(investmentDateTo, 'end')
+    const maturityFromTime = getDateFilterTime(maturityDateFrom, 'start')
+    const maturityToTime = getDateFilterTime(maturityDateTo, 'end')
 
     return activeDeposits
       .filter((deposit) => (showClosed ? true : deposit.status !== 'Closed'))
       .filter((deposit) => {
-        if (!query) {
+        const investmentTime = getDateFilterTime(deposit.investmentDate, 'start')
+        const maturityTime = getDateFilterTime(deposit.maturityDate, 'start')
+
+        if (investmentFromTime !== null && (investmentTime === null || investmentTime < investmentFromTime)) {
+          return false
+        }
+        if (investmentToTime !== null && (investmentTime === null || investmentTime > investmentToTime)) {
+          return false
+        }
+        if (maturityFromTime !== null && (maturityTime === null || maturityTime < maturityFromTime)) {
+          return false
+        }
+        if (maturityToTime !== null && (maturityTime === null || maturityTime > maturityToTime)) {
+          return false
+        }
+
+        return true
+      })
+      .filter((deposit) => {
+        if (queryTerms.length === 0) {
           return true
         }
 
         const holderTokens = getHolderSearchTokens(deposit.holderName, ownerAliasLookup)
         const fundingSourceTokens = getHolderSearchTokens(deposit.fundingSource, ownerAliasLookup)
+        const dateTokens = [
+          ...getSearchDateTokens(deposit.investmentDate),
+          ...getSearchDateTokens(deposit.maturityDate),
+        ]
 
         const searchableFields = {
           all: [
@@ -364,6 +455,9 @@ function App() {
             deposit.id,
             deposit.instrumentType,
             deposit.payoutMode,
+            deposit.investmentDate,
+            deposit.maturityDate,
+            ...dateTokens,
             ...holderTokens,
             ...fundingSourceTokens,
             ...getFundingAllocations(deposit).map((allocation) => allocation.eventId),
@@ -371,6 +465,7 @@ function App() {
           holder: [...holderTokens, deposit.holderName],
           funding: [...fundingSourceTokens, deposit.fundingSource],
           bank: [deposit.bankName, deposit.branchCity, deposit.accountNumber],
+          dates: dateTokens,
           instrument: [
             deposit.instrumentType,
             formatTenure(deposit),
@@ -382,13 +477,14 @@ function App() {
           group: [deposit.id, ...getFundingAllocations(deposit).map((allocation) => allocation.eventId)],
         }
 
-        return (searchableFields[searchScope] || searchableFields.all)
+        const haystack = (searchableFields[searchScope] || searchableFields.all)
           .join(' ')
           .toLowerCase()
-          .includes(query)
+
+        return queryTerms.every((term) => haystack.includes(term))
       })
       .sort((left, right) => getDateSortValue(left.maturityDate) - getDateSortValue(right.maturityDate))
-  }, [activeDeposits, deferredSearch, ownerAliasLookup, searchScope, showClosed])
+  }, [activeDeposits, deferredSearch, investmentDateFrom, investmentDateTo, maturityDateFrom, maturityDateTo, ownerAliasLookup, searchScope, showClosed])
 
   const selectedDeposit =
     activeDeposits.find((deposit) => deposit.id === selectedId) ?? activeDeposits[0] ?? null
@@ -405,17 +501,24 @@ function App() {
         ...entry,
         amount: Number(entry.amount || 0),
       }))
+      const settlements = (settlementMap.get(event.eventId) ?? []).map((entry) => ({
+        ...entry,
+        amount: Number(entry.amount || 0),
+      }))
       const allocatedAmount = allocations.reduce((sum, entry) => sum + entry.amount, 0)
+      const settledAmount = settlements.reduce((sum, entry) => sum + entry.amount, 0)
       const allocatedWithinEventAmount = Math.min(allocatedAmount, Number(event.amount || 0))
       const externalTopUpAmount = Math.max(allocatedAmount - Number(event.amount || 0), 0)
-      const unallocatedAmount = Math.max(event.amount - allocatedAmount, 0)
+      const unallocatedAmount = Math.max(event.amount - allocatedAmount - settledAmount, 0)
 
       return {
         ...event,
         isDue,
         allocations,
+        settlements,
         allocatedAmount,
         allocatedWithinEventAmount,
+        settledAmount,
         externalTopUpAmount,
         unallocatedAmount,
       }
@@ -424,6 +527,7 @@ function App() {
     return {
       totalExpected: eventRows.reduce((sum, event) => sum + Number(event.amount || 0), 0),
       totalAllocated: eventRows.reduce((sum, event) => sum + event.allocatedAmount, 0),
+      totalSettled: eventRows.reduce((sum, event) => sum + event.settledAmount, 0),
       totalUnallocated: eventRows.reduce((sum, event) => sum + event.unallocatedAmount, 0),
       totalExternalTopUp: eventRows.reduce((sum, event) => sum + event.externalTopUpAmount, 0),
       totalDueExpected: eventRows.reduce(
@@ -432,6 +536,10 @@ function App() {
       ),
       totalDueAllocated: eventRows.reduce(
         (sum, event) => sum + (event.isDue ? event.allocatedWithinEventAmount : 0),
+        0,
+      ),
+      totalDueSettled: eventRows.reduce(
+        (sum, event) => sum + (event.isDue ? event.settledAmount : 0),
         0,
       ),
       totalDueUnallocated: eventRows.reduce(
@@ -444,7 +552,7 @@ function App() {
       ),
       eventRows,
     }
-  }, [allocationMap, selectedInterestEvents])
+  }, [allocationMap, selectedInterestEvents, settlementMap])
 
   const stats = useMemo(() => {
     const openDeposits = activeDeposits.filter((deposit) => deposit.status === 'Open')
@@ -482,7 +590,11 @@ function App() {
         (childSum, child) => childSum + Number(child.amount || 0),
         0,
       )
-      return sum + Math.max(event.amount - allocated, 0)
+      const settled = (settlementMap.get(event.eventId) ?? []).reduce(
+        (settlementSum, entry) => settlementSum + Number(entry.amount || 0),
+        0,
+      )
+      return sum + Math.max(event.amount - allocated - settled, 0)
     }, 0)
     const maturityAwaitingReinvestment = maturedWithPostTds
       .map((event) => {
@@ -490,11 +602,16 @@ function App() {
           (childSum, child) => childSum + Number(child.amount || 0),
           0,
         )
+        const settled = (settlementMap.get(event.eventId) ?? []).reduce(
+          (settlementSum, entry) => settlementSum + Number(entry.amount || 0),
+          0,
+        )
 
         return {
           ...event,
           allocatedAmount: Math.min(allocated, Number(event.amount || 0)),
-          unallocatedAmount: Math.max(Number(event.amount || 0) - allocated, 0),
+          settledAmount: settled,
+          unallocatedAmount: Math.max(Number(event.amount || 0) - allocated - settled, 0),
         }
       })
       .filter((event) => event.unallocatedAmount > 0)
@@ -510,7 +627,11 @@ function App() {
         (childSum, child) => childSum + Number(child.amount || 0),
         0,
       )
-      return sum + Math.max(event.amount - allocated, 0)
+      const settled = (settlementMap.get(event.eventId) ?? []).reduce(
+        (settlementSum, entry) => settlementSum + Number(entry.amount || 0),
+        0,
+      )
+      return sum + Math.max(event.amount - allocated - settled, 0)
     }, 0)
     const futureInterestCash = futureInterestEvents.reduce(
       (sum, event) => sum + Number(event.amount || 0),
@@ -522,11 +643,16 @@ function App() {
           (childSum, child) => childSum + Number(child.amount || 0),
           0,
         )
+        const settled = (settlementMap.get(event.eventId) ?? []).reduce(
+          (settlementSum, entry) => settlementSum + Number(entry.amount || 0),
+          0,
+        )
 
         return {
           ...event,
           allocatedAmount: Math.min(allocated, Number(event.amount || 0)),
-          unallocatedAmount: Math.max(Number(event.amount || 0) - allocated, 0),
+          settledAmount: settled,
+          unallocatedAmount: Math.max(Number(event.amount || 0) - allocated - settled, 0),
         }
       })
       .filter((event) => event.unallocatedAmount > 0)
@@ -559,7 +685,6 @@ function App() {
 
     const upcomingInterestEvents = cashFlowEvents
       .filter((event) => event.type === 'Interest' && new Date(event.date) >= addDays(TODAY, -1))
-      .slice(0, 4)
     const upcomingInterestSummary = Array.from(
       futureInterestEvents.reduce((map, event) => {
         const current = map.get(event.depositId)
@@ -586,7 +711,6 @@ function App() {
       }, new Map()).values(),
     )
       .sort((left, right) => new Date(left.nextPaymentDate) - new Date(right.nextPaymentDate))
-      .slice(0, 4)
 
     const ownerSummary = Array.from(
       activeDeposits.reduce((map, deposit) => {
@@ -655,21 +779,28 @@ function App() {
       ownerSummary,
       currentFinancialYearLabel: selectedFinancialYearRange.label,
     }
-  }, [activeDeposits, allocationMap, cashFlowEvents, selectedFinancialYearRange.end, selectedFinancialYearRange.label, selectedFinancialYearRange.start])
+  }, [activeDeposits, allocationMap, cashFlowEvents, selectedFinancialYearRange.end, selectedFinancialYearRange.label, selectedFinancialYearRange.start, settlementMap])
 
   const selectedReinvestmentSummary = selectedDeposit
     ? (() => {
         const children = allocationMap.get(getMaturitySourceEventId(selectedDeposit.id)) ?? []
+        const settlements = settlementMap.get(getMaturitySourceEventId(selectedDeposit.id)) ?? []
         const availableAmount = getPostTdsAmount(selectedDeposit)
         const reinvestedAmount = children.reduce(
           (sum, child) => sum + Number(child.amount || 0),
+          0,
+        )
+        const settledAmount = settlements.reduce(
+          (sum, entry) => sum + Number(entry.amount || 0),
           0,
         )
 
         return {
           availableAmount,
           reinvestedAmount,
-          uninvestedAmount: availableAmount === null ? null : availableAmount - reinvestedAmount,
+          settledAmount,
+          settlements,
+          uninvestedAmount: availableAmount === null ? null : Math.max(availableAmount - reinvestedAmount - settledAmount, 0),
           childCount: children.length,
           children,
           isRealized: new Date(`${selectedDeposit.maturityDate}T00:00:00`) <= TODAY,
@@ -842,7 +973,14 @@ function App() {
   }
 
   const openDepositFromInterestEvent = (event) => {
-    setSelectedId(event.depositId)
+    openDepositDrilldown(
+      event.depositId,
+      event.accountNumber || event.depositId,
+    )
+  }
+
+  const openDepositDetail = (depositId) => {
+    setSelectedId(depositId)
     setMobileDepositsScreen('detail')
     setMobileDetailSections({
       summary: true,
@@ -852,11 +990,13 @@ function App() {
     })
     setIsMobileNavOpen(false)
     setInterestFocusMode('all')
-    setMaturityFocusMode('all')
-    setActiveTab('deposits')
-  }
+      setMaturityFocusMode('all')
+      setActiveTab('deposits')
+    }
 
-  const openDepositDetail = (depositId) => {
+  const openDepositDrilldown = (depositId, searchTextValue = '') => {
+    setSearchScope('all')
+    setSearchText(String(searchTextValue || '').trim())
     setSelectedId(depositId)
     setMobileDepositsScreen('detail')
     setMobileDetailSections({
@@ -1203,7 +1343,7 @@ function App() {
 
     setFormErrors({})
 
-    const normalized = normalizeDeposit(effectiveFormValues, editingId, nextSrNo)
+    const normalized = normalizeDeposit(effectiveFormValues, editingId, nextSrNo, currentEditingDeposit)
 
     try {
       setLoadError('')
@@ -1233,6 +1373,82 @@ function App() {
       resetForm()
     } catch (error) {
       setLoadError(error.message)
+    }
+  }
+
+  const settleCashFlowEvent = async (cashFlowEvent) => {
+    if (!canEditPortfolio || !cashFlowEvent?.eventId || !cashFlowEvent?.depositId || settlingEventId) {
+      return
+    }
+
+    const sourceDeposit = deposits.find((deposit) => deposit.id === cashFlowEvent.depositId)
+    if (!sourceDeposit) {
+      return
+    }
+
+    const allocatedAmount = (allocationMap.get(cashFlowEvent.eventId) ?? []).reduce(
+      (sum, entry) => sum + Number(entry.amount || 0),
+      0,
+    )
+    const settledAmount = (settlementMap.get(cashFlowEvent.eventId) ?? []).reduce(
+      (sum, entry) => sum + Number(entry.amount || 0),
+      0,
+    )
+    const remainingAmount = Math.max(
+      Number(cashFlowEvent.unallocatedAmount ?? cashFlowEvent.amount ?? 0),
+      Math.max(Number(cashFlowEvent.amount || 0) - allocatedAmount - settledAmount, 0),
+    )
+
+    if (remainingAmount <= 0) {
+      return
+    }
+
+    const existingSettlements = getCashSettlements(sourceDeposit)
+    const existingEntry = existingSettlements.find((entry) => entry.eventId === cashFlowEvent.eventId)
+    const nextSettlements = existingEntry
+      ? existingSettlements.map((entry) =>
+          entry.eventId === cashFlowEvent.eventId
+            ? {
+                ...entry,
+                amount: Number(entry.amount || 0) + remainingAmount,
+                settledAt: toYmd(new Date()),
+              }
+            : entry,
+        )
+      : [
+          ...existingSettlements,
+          {
+            eventId: cashFlowEvent.eventId,
+            amount: remainingAmount,
+            settledAt: toYmd(new Date()),
+          },
+        ]
+
+    try {
+      setSettlingEventId(cashFlowEvent.eventId)
+      setLoadError('')
+      const savedDeposit = hydrateDeposit(
+        await requestJson(
+          buildOwnerScopedPath(`/api/deposits/${sourceDeposit.id}`, activePortfolioOwnerId),
+          {
+            method: 'PUT',
+            body: JSON.stringify({
+              ...sourceDeposit,
+              cashSettlements: nextSettlements,
+            }),
+          },
+        ),
+      )
+
+      startTransition(() => {
+        setDeposits((current) =>
+          current.map((deposit) => (deposit.id === savedDeposit.id ? savedDeposit : deposit)),
+        )
+      })
+    } catch (error) {
+      setLoadError(error.message)
+    } finally {
+      setSettlingEventId('')
     }
   }
 
@@ -1541,8 +1757,12 @@ function App() {
 
           return sum + Number(entry.amount || 0)
         }, 0)
+        const settledByOthers = (settlementMap.get(event.eventId) ?? []).reduce(
+          (sum, entry) => sum + Number(entry.amount || 0),
+          0,
+        )
         const currentLinkedAmount = fundingEntriesByEventId.get(event.eventId) ?? 0
-        const availableAmount = Math.max(Number(event.amount || 0) - allocatedByOthers, 0)
+        const availableAmount = Math.max(Number(event.amount || 0) - allocatedByOthers - settledByOthers, 0)
         const canUse = availableAmount > 0 || currentLinkedAmount > 0
 
         return {
@@ -1553,8 +1773,8 @@ function App() {
           isRealized,
           label:
             event.type === 'Interest'
-              ? `${event.bankName} interest • ${formatDate(event.date)} • ${formatCurrency(availableAmount)} available`
-              : `${event.bankName} maturity • ${formatDate(event.date)} • ${formatCurrency(availableAmount)} available`,
+              ? `${event.bankName} | ${event.accountNumber || 'No account no.'} | Interest | ${formatDate(event.date)} | ${formatCurrency(availableAmount)} available`
+              : `${event.bankName} | ${event.accountNumber || 'No account no.'} | Maturity | ${formatDate(event.date)} | ${formatCurrency(availableAmount)} available`,
         }
       })
       .filter((event) => event.canUse && event.isRealized)
@@ -1578,7 +1798,14 @@ function App() {
   const mobileEditorTitle = editingId ? 'Edit deposit' : 'Add deposit'
   const mobileMastersTitle = 'Masters'
   const mobileAdminTitle = 'Admin'
-  const hasActiveDepositFilters = searchScope !== 'all' || searchText.trim() !== '' || !showClosed
+  const hasActiveDepositFilters =
+    searchScope !== 'all' ||
+    searchText.trim() !== '' ||
+    investmentDateFrom !== '' ||
+    investmentDateTo !== '' ||
+    maturityDateFrom !== '' ||
+    maturityDateTo !== '' ||
+    !showClosed
   const mobileCompactHeaderTitle =
     visibleActiveTab === 'dashboard'
       ? 'Dashboard'
@@ -1598,8 +1825,16 @@ function App() {
           ? 'Bank/account'
           : searchScope === 'instrument'
             ? 'Instrument'
-            : 'ID/source'}` : null,
+            : searchScope === 'dates'
+              ? 'Dates'
+              : 'ID/source'}` : null,
     searchText.trim() ? `Search: ${searchText.trim()}` : null,
+    investmentDateFrom || investmentDateTo
+      ? `Invested: ${investmentDateFrom || 'Any'} to ${investmentDateTo || 'Any'}`
+      : null,
+    maturityDateFrom || maturityDateTo
+      ? `Maturity: ${maturityDateFrom || 'Any'} to ${maturityDateTo || 'Any'}`
+      : null,
     !showClosed ? 'Open only' : null,
   ].filter(Boolean)
   const showAppHeader = !isMobileEditorScreen
@@ -1644,6 +1879,13 @@ function App() {
       {!isMobile && activeHelpKey === key && <span className="help-popover">{text}</span>}
     </span>
   )
+
+  const handleActionCardKeyDown = (event, action) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      action()
+    }
+  }
 
   const openAdmin = () => {
     if (!canUseAdmin) {
@@ -1707,14 +1949,11 @@ function App() {
   const desktopTabs = [
     ['dashboard', 'Dashboard'],
     ['deposits', 'Deposits'],
-    ...(canEditPortfolio ? [['editor', editingId ? 'Edit' : 'Add'], ['masters', 'Masters']] : []),
-    ...(canUseAdmin ? [['admin', 'Admin']] : []),
   ]
 
   const mobileTabs = [
     ['dashboard', 'Dashboard'],
     ['deposits', 'Deposits'],
-    ...(canEditPortfolio ? [['editor', editingId ? 'Edit' : 'Add']] : []),
   ]
 
   if (!sessionState.authenticated) {
@@ -1731,30 +1970,67 @@ function App() {
   return (
     <div className={`shell ${themeClass}`}>
       {showAppHeader && (
-        <header className="app-topbar">
-          <div className="app-topbar-copy">
-            <strong className="app-topbar-title">YieldFlow</strong>
-            <span className="app-topbar-subtitle">{mobileCompactHeaderTitle}</span>
-          </div>
-          <div className="app-topbar-actions">
-            <button
-              type="button"
-              className={isSettingsOpen ? 'icon-btn active' : 'icon-btn'}
-              onClick={() => setIsSettingsOpen((current) => !current)}
-              aria-label="Open settings"
-            >
-              {sessionState.user?.photoUrl ? (
-                <img className="topbar-avatar" src={sessionState.user.photoUrl} alt={sessionState.user.displayName} />
-              ) : (
-                <div className="topbar-avatar fallback-avatar" aria-hidden="true">
-                  {String(sessionState.user?.displayName || sessionState.user?.email || 'Y')
-                    .trim()
-                    .slice(0, 1)
-                    .toUpperCase()}
-                </div>
+        <header className="app-header">
+          <div className="app-topbar">
+            <div className="app-topbar-copy">
+              <strong className="app-topbar-title">YieldFlow</strong>
+              <span className="app-topbar-subtitle">{mobileCompactHeaderTitle}</span>
+            </div>
+            <div className="app-topbar-actions">
+              {!isMobile && canEditPortfolio && (
+                <button
+                  type="button"
+                  className="primary-btn compact add-investment-btn"
+                  onClick={startNewDeposit}
+                >
+                  + Add Investment
+                </button>
               )}
-            </button>
+              <button
+                type="button"
+                className={isSettingsOpen ? 'icon-btn active' : 'icon-btn'}
+                onClick={() => setIsSettingsOpen((current) => !current)}
+                aria-label="Open settings"
+              >
+                {sessionState.user?.photoUrl ? (
+                  <img className="topbar-avatar" src={sessionState.user.photoUrl} alt={sessionState.user.displayName} />
+                ) : (
+                  <div className="topbar-avatar fallback-avatar" aria-hidden="true">
+                    {String(sessionState.user?.displayName || sessionState.user?.email || 'Y')
+                      .trim()
+                      .slice(0, 1)
+                      .toUpperCase()}
+                  </div>
+                )}
+              </button>
+            </div>
           </div>
+          {!isMobileEditorScreen && !isMobile && (
+            <div className="topbar-tab-track">
+              <nav
+                id="desktop-sections"
+                className="tab-bar topbar-tab-bar"
+                aria-label="Sections"
+              >
+                {desktopTabs.map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={visibleActiveTab === value ? 'tab active' : 'tab'}
+                    onClick={() => {
+                      setActiveTab(value)
+                      if (value === 'deposits') {
+                        setMobileDepositsScreen('list')
+                      }
+                      setIsMobileNavOpen(false)
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </nav>
+            </div>
+          )}
         </header>
       )}
 
@@ -1918,31 +2194,6 @@ function App() {
         </section>
       )}
 
-      {!isMobileEditorScreen && !isMobile && (
-        <nav
-          id="mobile-sections"
-          className="tab-bar"
-          aria-label="Sections"
-        >
-          {desktopTabs.map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              className={visibleActiveTab === value ? 'tab active' : 'tab'}
-              onClick={() => {
-                setActiveTab(value)
-                if (value === 'deposits') {
-                  setMobileDepositsScreen('list')
-                }
-                setIsMobileNavOpen(false)
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </nav>
-      )}
-
       {!isMobileEditorScreen && isMobile && (
         <nav className="bottom-nav" aria-label="Primary navigation">
           {mobileTabs.map(([value, label]) => (
@@ -1966,6 +2217,17 @@ function App() {
         </nav>
       )}
 
+      {!isMobileEditorScreen && isMobile && canEditPortfolio && (
+        <button
+          type="button"
+          className="mobile-fab"
+          onClick={startNewDeposit}
+          aria-label="Add investment"
+        >
+          +
+        </button>
+      )}
+
       {isMobile && activeHelpKey && helpCopy[activeHelpKey] && (
         <div className="mobile-help-sheet" role="status" aria-live="polite">
           <div className="mobile-help-sheet-copy">
@@ -1983,7 +2245,7 @@ function App() {
       )}
 
       {visibleActiveTab === 'dashboard' && (
-        <section className="dashboard-layout">
+        <section className="dashboard-layout view-stage">
           <div className="stack">
             <article className="panel">
               <div className="section-head">
@@ -2024,30 +2286,48 @@ function App() {
                 <strong>{formatCurrency(stats.realisedInterest)}</strong>
                 <small>FY {stats.currentFinancialYearLabel}</small>
               </article>
-              <button type="button" className="stat-card stat-card-action" onClick={showMaturityDrilldown}>
+              <article
+                className="stat-card stat-card-action clickable-surface"
+                role="button"
+                tabIndex={0}
+                onClick={showMaturityDrilldown}
+                onKeyDown={(event) => handleActionCardKeyDown(event, showMaturityDrilldown)}
+              >
                 <span className="stat-label-row">
                   <span>Unused maturity cash</span>
                   {renderHelpHint('unused-maturity-cash', 'This is maturity money already received but not yet used in a new investment.')}
                 </span>
                 <strong>{formatCurrency(stats.uninvestedMaturityCash)}</strong>
                 <small>FY {stats.currentFinancialYearLabel} | View investments</small>
-              </button>
-              <button type="button" className="stat-card stat-card-action warning" onClick={showUnusedInterestDrilldown}>
+              </article>
+              <article
+                className="stat-card stat-card-action warning clickable-surface"
+                role="button"
+                tabIndex={0}
+                onClick={showUnusedInterestDrilldown}
+                onKeyDown={(event) => handleActionCardKeyDown(event, showUnusedInterestDrilldown)}
+              >
                 <span className="stat-label-row">
                   <span>Interest not reused</span>
                   {renderHelpHint('interest-not-reused', 'This is interest already received but still sitting unused.')}
                 </span>
                 <strong>{formatCurrency(stats.uninvestedInterestCash)}</strong>
                 <small>FY {stats.currentFinancialYearLabel} | View investments</small>
-              </button>
-              <button type="button" className="stat-card stat-card-action" onClick={showUpcomingInterestDrilldown}>
+              </article>
+              <article
+                className="stat-card stat-card-action clickable-surface"
+                role="button"
+                tabIndex={0}
+                onClick={showUpcomingInterestDrilldown}
+                onKeyDown={(event) => handleActionCardKeyDown(event, showUpcomingInterestDrilldown)}
+              >
                 <span className="stat-label-row">
                   <span>Upcoming interest</span>
                   {renderHelpHint('upcoming-interest', 'This only shows future interest for deposits that pay interest before maturity, like quarterly or yearly payout products.')}
                 </span>
                 <strong>{formatCurrency(stats.futureInterestCash)}</strong>
                 <small>FY {stats.currentFinancialYearLabel} | View schedule</small>
-              </button>
+              </article>
             </div>
 
             <article id="dashboard-maturity-section" className="panel">
@@ -2087,12 +2367,15 @@ function App() {
                 ).map((deposit) => (
                   <button
                     key={maturityFocusMode === 'pending' ? deposit.eventId : deposit.id}
-                    type="button"
-                    className="deposit-card"
-                    onClick={() =>
-                      openDepositDetail(maturityFocusMode === 'pending' ? deposit.depositId : deposit.id)
-                    }
-                  >
+                      type="button"
+                      className="deposit-card clickable-surface"
+                      onClick={() =>
+                        openDepositDrilldown(
+                          maturityFocusMode === 'pending' ? deposit.depositId : deposit.id,
+                          deposit.accountNumber || (maturityFocusMode === 'pending' ? deposit.depositId : deposit.id),
+                        )
+                      }
+                    >
                     <div className="deposit-topline">
                       <strong>{deposit.bankName}</strong>
                       <span className={deposit.status === 'Closed' ? 'pill closed' : 'pill open'}>
@@ -2157,7 +2440,7 @@ function App() {
                     <button
                       key={event.depositId}
                       type="button"
-                      className="deposit-card"
+                      className="deposit-card clickable-surface"
                       onClick={() => openDepositFromInterestEvent(event)}
                     >
                       <div className="deposit-topline">
@@ -2212,7 +2495,7 @@ function App() {
                 <button
                   key={owner.holderName}
                   type="button"
-                  className="owner-card"
+                  className="owner-card clickable-surface"
                   onClick={() => {
                     openDepositsList({
                       searchScope: 'holder',
@@ -2226,11 +2509,28 @@ function App() {
                 >
                   <div className="owner-card-head">
                     <strong>{owner.holderName}</strong>
-                    <span>{owner.openDeposits} open</span>
                   </div>
                   <div className="owner-card-value">{formatCurrency(owner.principalAmount)}</div>
-                  <p className="owner-card-subtitle">Active principal</p>
-                  <p className="owner-card-foot">Next maturity {formatDate(owner.nextMaturityDate)}</p>
+                  <p className="owner-card-subtitle">
+                    <span className="owner-card-icon-label" aria-hidden="true">💰</span>
+                    <span>Principal</span>
+                  </p>
+                  <div className="owner-card-details">
+                    <p>
+                      <strong>
+                        <span className="owner-card-icon-label" aria-hidden="true">◌</span>
+                        <span>Open</span>
+                      </strong>
+                      <span>{owner.openDeposits} investments</span>
+                    </p>
+                    <p>
+                      <strong>
+                        <span className="owner-card-icon-label" aria-hidden="true">📅</span>
+                        <span>Maturity</span>
+                      </strong>
+                      <span>{formatDate(owner.nextMaturityDate)}</span>
+                    </p>
+                  </div>
                 </button>
               ))}
             </div>
@@ -2239,7 +2539,8 @@ function App() {
       )}
 
       {visibleActiveTab === 'deposits' && (
-        <DepositsView
+        <div className="view-stage">
+          <DepositsView
           isMobile={isMobile}
           isReadOnly={isReadOnlyPortfolio}
           ownerUserId={activePortfolioOwnerId}
@@ -2254,6 +2555,14 @@ function App() {
           setSearchScope={setSearchScope}
           searchText={searchText}
           setSearchText={setSearchText}
+          investmentDateFrom={investmentDateFrom}
+          setInvestmentDateFrom={setInvestmentDateFrom}
+          investmentDateTo={investmentDateTo}
+          setInvestmentDateTo={setInvestmentDateTo}
+          maturityDateFrom={maturityDateFrom}
+          setMaturityDateFrom={setMaturityDateFrom}
+          maturityDateTo={maturityDateTo}
+          setMaturityDateTo={setMaturityDateTo}
           showClosed={showClosed}
           setShowClosed={setShowClosed}
           filteredDeposits={filteredDeposits}
@@ -2281,6 +2590,8 @@ function App() {
           fillFromSelectedMaturity={fillFromSelectedMaturity}
           fillFromAllAvailableInterest={fillFromAllAvailableInterest}
           applyCashFlowSource={applyCashFlowSource}
+          settleCashFlowEvent={settleCashFlowEvent}
+          settlingEventId={settlingEventId}
           mobileDetailSections={mobileDetailSections}
           toggleMobileDetailSection={toggleMobileDetailSection}
           needsPeriodicPayoutSetup={needsPeriodicPayoutSetup}
@@ -2291,10 +2602,12 @@ function App() {
           todayTime={TODAY.getTime()}
           canDeletePortfolio={canDeletePortfolio}
         />
+        </div>
       )}
 
       {visibleActiveTab === 'editor' && (
-        <DepositEditorView
+        <div className="view-stage">
+          <DepositEditorView
           isMobileEditorScreen={isMobileEditorScreen}
           mobileEditorTitle={mobileEditorTitle}
           editingId={editingId}
@@ -2333,10 +2646,12 @@ function App() {
           handleSave={handleSave}
           resetForm={resetForm}
         />
+        </div>
       )}
 
       {visibleActiveTab === 'masters' && (
-        <MastersView
+        <div className="view-stage">
+          <MastersView
           key={`${mastersViewSeed}-${JSON.stringify(masterData)}`}
           isMobile={isMobile}
           masterData={masterData}
@@ -2351,15 +2666,18 @@ function App() {
           showReturnToEditor={mastersReturnTarget === 'editor'}
           isReadOnly={isReadOnlyPortfolio}
         />
+        </div>
       )}
 
       {visibleActiveTab === 'admin' && canUseAdmin && (
-        <AdminView
+        <div className="view-stage">
+          <AdminView
           totalInvestments={deposits.length}
           onDownloadWorkbook={handleDownloadWorkbook}
           portfolioLabel={activePortfolioLabel}
           isDownloadingWorkbook={isDownloadingWorkbook}
         />
+        </div>
       )}
     </div>
   )

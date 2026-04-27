@@ -281,6 +281,14 @@ export default function MastersView({
     saveMasterData(sanitizeMasterData(formState))
   }
 
+  const renderEmptyHint = (icon, text) => (
+    <div className="empty-state-card masters-empty-state">
+      <div className="empty-state-icon masters-empty-icon" aria-hidden="true">{icon}</div>
+      <p className="lineage-empty">{text}</p>
+      <p className="masters-empty-copy">Get Started by adding your first entry.</p>
+    </div>
+  )
+
   const renderNamedSection = (title, description, sectionKey, addLabel) => (
     <section className="editor-section">
       <div className="section-head">
@@ -320,7 +328,7 @@ export default function MastersView({
             </div>
           ))
         ) : (
-          <p className="lineage-empty">No entries yet.</p>
+          renderEmptyHint('◌', 'No entries yet.')
         )}
       </div>
     </section>
@@ -400,7 +408,7 @@ export default function MastersView({
                   </div>
                 ))
               ) : (
-                <p className="lineage-empty">No owners added yet.</p>
+                renderEmptyHint('◌', 'No owners added yet.')
               )}
             </div>
           </section>
@@ -476,13 +484,13 @@ export default function MastersView({
                           </div>
                         ))
                       ) : (
-                        <p className="lineage-empty">No branches added yet.</p>
+                        renderEmptyHint('⌁', 'No branches added yet.')
                       )}
                     </div>
                   </div>
                 ))
               ) : (
-                <p className="lineage-empty">No institutions added yet.</p>
+                renderEmptyHint('◇', 'No institutions added yet.')
               )}
             </div>
           </section>

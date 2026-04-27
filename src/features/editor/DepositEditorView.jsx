@@ -1,3 +1,5 @@
+import { useMemo, useState } from 'react'
+
 export default function DepositEditorView({
   isMobileEditorScreen,
   mobileEditorTitle,
@@ -51,6 +53,40 @@ export default function DepositEditorView({
 
   const tenureSummary = tenureParts.length > 0 ? tenureParts.join(' ') : 'Will appear after both dates are entered'
   const isEditingFundingEntry = fundingEntries.some((entry) => entry.eventId === selectedFundingEventId)
+  const [fundingSourceSearch, setFundingSourceSearch] = useState('')
+  const filteredFundingSourceOptions = useMemo(() => {
+    const normalizedQuery = fundingSourceSearch.trim().toLowerCase()
+
+    if (!normalizedQuery) {
+      return fundingSourceOptions
+    }
+
+    const matches = fundingSourceOptions.filter((option) => {
+      const searchText = [
+        option.bankName,
+        option.accountNumber,
+        option.holderName,
+        option.type,
+        option.date,
+        option.label,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+
+      return searchText.includes(normalizedQuery)
+    })
+
+    if (selectedFundingEventId && !matches.some((option) => option.eventId === selectedFundingEventId)) {
+      const selectedOption = fundingSourceOptions.find((option) => option.eventId === selectedFundingEventId)
+
+      if (selectedOption) {
+        return [selectedOption, ...matches]
+      }
+    }
+
+    return matches
+  }, [fundingSourceOptions, fundingSourceSearch, selectedFundingEventId])
 
   return (
     <section className="stack">
@@ -80,6 +116,13 @@ export default function DepositEditorView({
               </p>
             )}
           </div>
+          {!isMobileEditorScreen && (
+            <div className="section-head-actions">
+              <button type="button" className="secondary-btn compact ghost-btn" onClick={leaveEditorScreen}>
+                Back
+              </button>
+            </div>
+          )}
         </div>
 
         <form className="editor-form" onSubmit={handleSave} autoComplete="off">
@@ -288,22 +331,34 @@ export default function DepositEditorView({
               </div>
             </div>
             {formErrors.allocationsText && <p className="field-error funding-error">{formErrors.allocationsText}</p>}
-            <div className="funding-picker">
-              <label className="field">
-                <span>Source</span>
-                <select value={selectedFundingEventId} onChange={handleFundingSourceSelect}>
-                  <option value="">Choose maturity cash or interest receipt</option>
-                  {fundingSourceOptions.map((option) => (
-                    <option key={option.eventId} value={option.eventId}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span>Amount to use</span>
-                <input type="number" value={fundingAmountDraft} onChange={(event) => setFundingAmountDraft(event.target.value)} placeholder="e.g. 5000" autoComplete="off" />
-              </label>
+              <div className="funding-picker">
+                <div className="field funding-source-field">
+                  <span>Source</span>
+                  <input
+                    type="search"
+                    value={fundingSourceSearch}
+                    onChange={(event) => setFundingSourceSearch(event.target.value)}
+                    placeholder="Search by account no., bank, holder, or date"
+                    autoComplete="off"
+                  />
+                  <p className="field-help funding-search-help">
+                    {fundingSourceSearch.trim()
+                      ? `${filteredFundingSourceOptions.length} matching source${filteredFundingSourceOptions.length === 1 ? '' : 's'}`
+                      : 'Search source FD by account number, bank, holder, or date.'}
+                  </p>
+                  <select value={selectedFundingEventId} onChange={handleFundingSourceSelect}>
+                    <option value="">Choose maturity cash or interest receipt</option>
+                    {filteredFundingSourceOptions.map((option) => (
+                      <option key={option.eventId} value={option.eventId}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <label className="field">
+                  <span>Amount to use</span>
+                  <input type="number" value={fundingAmountDraft} onChange={(event) => setFundingAmountDraft(event.target.value)} placeholder="e.g. 5000" autoComplete="off" />
+                </label>
               <div className="field funding-picker-action">
                 <span className="funding-picker-action-label" aria-hidden="true">
                   Action
@@ -314,9 +369,12 @@ export default function DepositEditorView({
               </div>
             </div>
 
-            {fundingSourceOptions.length === 0 && (
-              <p className="field-help">No realized maturity cash or interest receipts are available to link right now.</p>
-            )}
+              {fundingSourceOptions.length === 0 && (
+                <p className="field-help">No realized maturity cash or interest receipts are available to link right now.</p>
+              )}
+              {fundingSourceOptions.length > 0 && fundingSourceSearch.trim() && filteredFundingSourceOptions.length === 0 && (
+                <p className="field-help">No source matched that search. Try account number, bank, holder, or date.</p>
+              )}
 
             {fundingEntries.length > 0 && (
               <div className="allocation-breakdown-list">
@@ -329,7 +387,7 @@ export default function DepositEditorView({
                         <strong>{sourceEvent?.bankName || entry.eventId}</strong>
                         <span>
                           {sourceEvent
-                            ? `${sourceEvent.type === 'Interest' ? 'Interest' : 'Maturity'} • ${formatDate(sourceEvent.date)}`
+                            ? `${sourceEvent.accountNumber || 'No account no.'} | ${sourceEvent.type === 'Interest' ? 'Interest' : 'Maturity'} | ${formatDate(sourceEvent.date)}`
                             : entry.eventId}
                         </span>
                       </div>

@@ -17,6 +17,14 @@ export default function DepositsView({
   setSearchScope,
   searchText,
   setSearchText,
+  investmentDateFrom,
+  setInvestmentDateFrom,
+  investmentDateTo,
+  setInvestmentDateTo,
+  maturityDateFrom,
+  setMaturityDateFrom,
+  maturityDateTo,
+  setMaturityDateTo,
   showClosed,
   setShowClosed,
   filteredDeposits,
@@ -44,6 +52,8 @@ export default function DepositsView({
   fillFromSelectedMaturity,
   fillFromAllAvailableInterest,
   applyCashFlowSource,
+  settleCashFlowEvent,
+  settlingEventId,
   mobileDetailSections,
   toggleMobileDetailSection,
   needsPeriodicPayoutSetup,
@@ -81,6 +91,7 @@ export default function DepositsView({
       <>
         <p><strong>Post-TDS maturity available:</strong> {formatCurrency(selectedReinvestmentSummary.availableAmount)}</p>
         <p><strong>Already reinvested:</strong> {formatCurrency(selectedReinvestmentSummary.reinvestedAmount)}</p>
+        <p><strong>Settled outside YieldFlow:</strong> {formatCurrency(selectedReinvestmentSummary.settledAmount)}</p>
         <p>
           <strong>Still uninvested:</strong>{' '}
           <span className={selectedReinvestmentSummary.uninvestedAmount > 0 ? 'amount-warning' : 'amount-ok'}>
@@ -91,6 +102,21 @@ export default function DepositsView({
           <div className="schedule-actions">
             <button type="button" className="secondary-btn compact" onClick={fillFromSelectedMaturity}>
               Use as source
+            </button>
+            <button
+              type="button"
+              className="secondary-btn compact ghost-btn"
+              onClick={() =>
+                settleCashFlowEvent({
+                  eventId: `maturity:${selectedDeposit.id}`,
+                  depositId: selectedDeposit.id,
+                  amount: selectedReinvestmentSummary.availableAmount,
+                  unallocatedAmount: selectedReinvestmentSummary.uninvestedAmount,
+                })
+              }
+              disabled={settlingEventId === `maturity:${selectedDeposit.id}`}
+            >
+              {settlingEventId === `maturity:${selectedDeposit.id}` ? 'Settling...' : 'Mark settled'}
             </button>
           </div>
         )}
@@ -135,6 +161,15 @@ export default function DepositsView({
     return Math.max(0, Math.min(100, ((todayTime - start) / (end - start)) * 100))
   }
 
+  const isPastMaturityOpen = (deposit) => {
+    if (!deposit || deposit.status === 'Closed' || !deposit.maturityDate) {
+      return false
+    }
+
+    const maturityTime = new Date(`${deposit.maturityDate}T00:00:00`).getTime()
+    return !Number.isNaN(maturityTime) && maturityTime < todayTime
+  }
+
   const renderDepositCard = (deposit) => (
     <>
       <div className="deposit-card-head">
@@ -147,13 +182,15 @@ export default function DepositsView({
             <span>{deposit.accountNumber || deposit.id}</span>
           </div>
         </div>
-        <span className={deposit.status === 'Closed' ? 'pill closed' : 'pill open'}>
-          {deposit.status}
-        </span>
+        <div className="deposit-card-side">
+          <span className={deposit.status === 'Closed' ? 'pill closed' : 'pill open'}>
+            {deposit.status}
+          </span>
+          <span className="deposit-time-remaining">{formatTenure(deposit)}</span>
+        </div>
       </div>
       <div className="deposit-amount-row">
         <strong className="deposit-amount">{formatCurrency(deposit.principalAmount)}</strong>
-        <span className="deposit-tenure">{formatTenure(deposit)}</span>
       </div>
       <div className="deposit-meta">
         <span>{deposit.holderName}</span>
@@ -167,6 +204,9 @@ export default function DepositsView({
       )}
       {needsPeriodicPayoutSetup(deposit) && (
         <p className="inline-warning">Missing periodic payout before/after TDS</p>
+      )}
+      {isPastMaturityOpen(deposit) && (
+        <p className="inline-warning past-maturity-warning">Past maturity and still open. Review this investment.</p>
       )}
     </>
   )
@@ -191,6 +231,37 @@ export default function DepositsView({
         <div className="mobile-detail-section-body">{children}</div>
       )}
     </section>
+  )
+
+  const dateRangeFilters = (
+    <div className="date-filter-grid">
+      <div className="date-filter-group">
+        <strong>Investment date</strong>
+        <div className="date-filter-row">
+          <label className="field">
+            <span>From</span>
+            <input type="date" value={investmentDateFrom} onChange={(event) => setInvestmentDateFrom(event.target.value)} />
+          </label>
+          <label className="field">
+            <span>To</span>
+            <input type="date" value={investmentDateTo} onChange={(event) => setInvestmentDateTo(event.target.value)} />
+          </label>
+        </div>
+      </div>
+      <div className="date-filter-group">
+        <strong>Maturity date</strong>
+        <div className="date-filter-row">
+          <label className="field">
+            <span>From</span>
+            <input type="date" value={maturityDateFrom} onChange={(event) => setMaturityDateFrom(event.target.value)} />
+          </label>
+          <label className="field">
+            <span>To</span>
+            <input type="date" value={maturityDateTo} onChange={(event) => setMaturityDateTo(event.target.value)} />
+          </label>
+        </div>
+      </div>
+    </div>
   )
 
   const depositsListPanel = (
@@ -221,11 +292,7 @@ export default function DepositsView({
           <div className="mobile-filter-summary">
             <div>
               <strong>Filters</strong>
-              <span>
-                {hasActiveDepositFilters
-                  ? `${filteredDeposits.length} matches with filters`
-                  : `${filteredDeposits.length} deposits`}
-              </span>
+              <span>{hasActiveDepositFilters ? 'Active filters applied' : 'Browse all deposits'}</span>
               {mobileFilterBadges.length > 0 && (
                 <div className="mobile-filter-badges">
                   {mobileFilterBadges.map((badge) => (
@@ -245,19 +312,23 @@ export default function DepositsView({
               {isMobileFiltersOpen ? 'Hide filters' : 'Show filters'}
             </button>
           </div>
+          <div className="deposit-results-summary mobile-results-summary" role="status" aria-live="polite">
+            <strong>{filteredDeposits.length}</strong>
+            <span>{filteredDeposits.length === 1 ? 'record shown' : 'records shown'}</span>
+          </div>
           {isMobileFiltersOpen && (
             <div className="mobile-filter-fields">
               <label className="field">
                 <span>Search scope</span>
-                <select value={searchScope} onChange={(event) => setSearchScope(event.target.value)}>
-                  <option value="all">All fields</option>
-                  <option value="holder">Holder only</option>
-                  <option value="funding">Funding source only</option>
-                  <option value="bank">Bank or account</option>
-                  <option value="instrument">Instrument or tenure</option>
-                  <option value="group">Investment ID or source event</option>
-                </select>
-              </label>
+                  <select value={searchScope} onChange={(event) => setSearchScope(event.target.value)}>
+                    <option value="all">All fields</option>
+                    <option value="holder">Holder only</option>
+                    <option value="funding">Funding source only</option>
+                    <option value="bank">Bank or account</option>
+                    <option value="instrument">Instrument or tenure</option>
+                    <option value="group">Investment ID or source event</option>
+                  </select>
+                </label>
 
               <label className="field">
                 <span>Search</span>
@@ -268,6 +339,8 @@ export default function DepositsView({
                   placeholder="me, wife, SCSS, SBI, maturity:fd-2..."
                 />
               </label>
+
+              {dateRangeFilters}
 
               <label className="checkbox-row">
                 <input
@@ -284,15 +357,15 @@ export default function DepositsView({
         <>
           <label className="field">
             <span>Search scope</span>
-            <select value={searchScope} onChange={(event) => setSearchScope(event.target.value)}>
-              <option value="all">All fields</option>
-              <option value="holder">Holder only</option>
-              <option value="funding">Funding source only</option>
-              <option value="bank">Bank or account</option>
-              <option value="instrument">Instrument or tenure</option>
-              <option value="group">Investment ID or source event</option>
-            </select>
-          </label>
+              <select value={searchScope} onChange={(event) => setSearchScope(event.target.value)}>
+                <option value="all">All fields</option>
+                <option value="holder">Holder only</option>
+                <option value="funding">Funding source only</option>
+                <option value="bank">Bank or account</option>
+                <option value="instrument">Instrument or tenure</option>
+                <option value="group">Investment ID or source event</option>
+              </select>
+            </label>
 
           <label className="field">
             <span>Search</span>
@@ -304,6 +377,8 @@ export default function DepositsView({
             />
           </label>
 
+          {dateRangeFilters}
+
           <label className="checkbox-row">
             <input
               type="checkbox"
@@ -312,6 +387,11 @@ export default function DepositsView({
             />
             <span>Show closed deposits</span>
           </label>
+
+          <div className="deposit-results-summary" role="status" aria-live="polite">
+            <strong>{filteredDeposits.length}</strong>
+            <span>{filteredDeposits.length === 1 ? 'record shown' : 'records shown'}</span>
+          </div>
         </>
       )}
 
@@ -320,7 +400,7 @@ export default function DepositsView({
           <button
             key={deposit.id}
             type="button"
-            className={selectedId === deposit.id ? 'deposit-card selected' : 'deposit-card'}
+            className={selectedId === deposit.id ? 'deposit-card selected clickable-surface' : 'deposit-card clickable-surface'}
             onClick={() => openDepositDetail(deposit.id)}
           >
             {renderDepositCard(deposit)}
@@ -424,6 +504,11 @@ export default function DepositsView({
               </div>
             </div>
           )}
+          {isPastMaturityOpen(selectedDeposit) && (
+            <div className="status-banner warning past-maturity-banner">
+              This investment has passed its maturity date but is still marked open. Review and close it if settlement is complete.
+            </div>
+          )}
 
           {isMobile ? (
             <>
@@ -473,7 +558,7 @@ export default function DepositsView({
                         >
                           <strong>{event.bankName}</strong>
                           <span>
-                            {event.type === 'Interest' ? 'Interest source' : 'Maturity source'} | {formatDate(event.date)} | {formatCurrency(event.allocatedAmount)}
+                            {event.accountNumber || 'No account no.'} | {event.type === 'Interest' ? 'Interest source' : 'Maturity source'} | {formatDate(event.date)} | {formatCurrency(event.allocatedAmount)}
                           </span>
                         </button>
                       ))}
@@ -519,6 +604,7 @@ export default function DepositsView({
                     <div className="interest-summary-grid">
                       <div className="interest-summary-card"><span>Interest received till date</span><strong>{formatCurrency(selectedInterestSummary.totalDueExpected)}</strong></div>
                       <div className="interest-summary-card"><span>Received and reinvested</span><strong>{formatCurrency(selectedInterestSummary.totalDueAllocated)}</strong></div>
+                      <div className="interest-summary-card"><span>Settled outside YieldFlow</span><strong>{formatCurrency(selectedInterestSummary.totalDueSettled)}</strong></div>
                       <div className="interest-summary-card">
                         <span>Received but not reinvested yet</span>
                         <strong className={selectedInterestSummary.totalDueUnallocated > 0 ? 'amount-warning' : 'amount-ok'}>
@@ -548,12 +634,21 @@ export default function DepositsView({
                                 {formatCurrency(event.unallocatedAmount)}
                               </span>
                             </p>
+                            {event.settledAmount > 0 && <p>Settled outside YieldFlow {formatCurrency(event.settledAmount)}</p>}
                             {event.externalTopUpAmount > 0 && <p>Added from other funds {formatCurrency(event.externalTopUpAmount)}</p>}
                           </div>
                           {!isReadOnly && event.isDue && event.unallocatedAmount > 0 && (
                             <div className="schedule-actions">
                               <button type="button" className="secondary-btn compact" onClick={() => applyCashFlowSource(event)}>
                                 Use as source
+                              </button>
+                              <button
+                                type="button"
+                                className="secondary-btn compact ghost-btn"
+                                onClick={() => settleCashFlowEvent(event)}
+                                disabled={settlingEventId === event.eventId}
+                              >
+                                {settlingEventId === event.eventId ? 'Settling...' : 'Mark settled'}
                               </button>
                             </div>
                           )}
@@ -620,7 +715,7 @@ export default function DepositsView({
                       >
                         <strong>{event.bankName}</strong>
                         <span>
-                          {event.type === 'Interest' ? 'Interest source' : 'Maturity source'} | {formatDate(event.date)} | {formatCurrency(event.allocatedAmount)}
+                          {event.accountNumber || 'No account no.'} | {event.type === 'Interest' ? 'Interest source' : 'Maturity source'} | {formatDate(event.date)} | {formatCurrency(event.allocatedAmount)}
                         </span>
                       </button>
                     ))}
@@ -652,6 +747,7 @@ export default function DepositsView({
                   <div className="interest-summary-grid">
                     <div className="interest-summary-card"><span>Interest received till date</span><strong>{formatCurrency(selectedInterestSummary.totalDueExpected)}</strong></div>
                     <div className="interest-summary-card"><span>Received and reinvested</span><strong>{formatCurrency(selectedInterestSummary.totalDueAllocated)}</strong></div>
+                    <div className="interest-summary-card"><span>Settled outside YieldFlow</span><strong>{formatCurrency(selectedInterestSummary.totalDueSettled)}</strong></div>
                     <div className="interest-summary-card">
                       <span>Received but not reinvested yet</span>
                       <strong className={selectedInterestSummary.totalDueUnallocated > 0 ? 'amount-warning' : 'amount-ok'}>
@@ -681,12 +777,21 @@ export default function DepositsView({
                               {formatCurrency(event.unallocatedAmount)}
                             </span>
                           </p>
+                          {event.settledAmount > 0 && <p>Settled outside YieldFlow {formatCurrency(event.settledAmount)}</p>}
                           {event.externalTopUpAmount > 0 && <p>Added from other funds {formatCurrency(event.externalTopUpAmount)}</p>}
                         </div>
                         {!isReadOnly && event.isDue && event.unallocatedAmount > 0 && (
                           <div className="schedule-actions">
                             <button type="button" className="secondary-btn compact" onClick={() => applyCashFlowSource(event)}>
                               Use as source
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary-btn compact ghost-btn"
+                              onClick={() => settleCashFlowEvent(event)}
+                              disabled={settlingEventId === event.eventId}
+                            >
+                              {settlingEventId === event.eventId ? 'Settling...' : 'Mark settled'}
                             </button>
                           </div>
                         )}
