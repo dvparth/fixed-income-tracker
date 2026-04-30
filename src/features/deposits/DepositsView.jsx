@@ -1,4 +1,5 @@
 import BulkImportPanel from '../import/BulkImportPanel.jsx'
+import { getCalculationFrequencyLabel } from './depositModel.js'
 
 const SHOW_BULK_IMPORT = false
 
@@ -521,6 +522,7 @@ export default function DepositsView({
                   <div><span>Funding source</span><strong>{selectedDeposit.fundingSource}</strong></div>
                   <div><span>Instrument</span><strong>{selectedDeposit.instrumentType}</strong></div>
                   <div><span>Payout mode</span><strong>{getPayoutModeLabel(selectedDeposit)}</strong></div>
+                  <div><span>Interest calc</span><strong>{getCalculationFrequencyLabel(selectedDeposit.calculationFrequency)}</strong></div>
                   <div><span>Principal</span><strong>{formatCurrency(selectedDeposit.principalAmount)}</strong></div>
                   <div><span>Interest rate</span><strong>{formatInterestRate(selectedDeposit.interestRate)}</strong></div>
                   <div><span>Interest payout before TDS</span><strong>{formatCurrency(selectedDeposit.interestPayoutBeforeTds)}</strong></div>
@@ -685,6 +687,7 @@ export default function DepositsView({
                 <div><span>Funding source</span><strong>{selectedDeposit.fundingSource}</strong></div>
                 <div><span>Instrument</span><strong>{selectedDeposit.instrumentType}</strong></div>
                 <div><span>Payout mode</span><strong>{getPayoutModeLabel(selectedDeposit)}</strong></div>
+                <div><span>Interest calc</span><strong>{getCalculationFrequencyLabel(selectedDeposit.calculationFrequency)}</strong></div>
                 <div><span>Principal</span><strong>{formatCurrency(selectedDeposit.principalAmount)}</strong></div>
                 <div><span>Interest rate</span><strong>{formatInterestRate(selectedDeposit.interestRate)}</strong></div>
                 <div><span>Interest payout before TDS</span><strong>{formatCurrency(selectedDeposit.interestPayoutBeforeTds)}</strong></div>

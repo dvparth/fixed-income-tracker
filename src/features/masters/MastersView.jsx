@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { OWNER_TYPE_OPTIONS } from '../../../shared/masterData.js'
 
 const createTempKey = () =>
   globalThis.crypto?.randomUUID?.() || `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
@@ -15,6 +16,11 @@ const toEditableOwners = (owners = []) =>
     key: createTempKey(),
     id: owner.id || '',
     name: owner.name || '',
+    ownerType: owner.ownerType || 'Individual',
+    taxSlabRate:
+      owner.taxSlabRate === '' || owner.taxSlabRate === null || owner.taxSlabRate === undefined
+        ? ''
+        : String(owner.taxSlabRate),
     aliasesText: (owner.aliases || []).join(', '),
   }))
 
@@ -30,6 +36,8 @@ const createBlankOwner = () => ({
   key: createTempKey(),
   id: '',
   name: '',
+  ownerType: 'Individual',
+  taxSlabRate: '',
   aliasesText: '',
 })
 
@@ -118,6 +126,11 @@ const sanitizeMasterData = (formState) => ({
     .map((owner) => ({
       id: owner.id || undefined,
       name: String(owner.name || '').trim(),
+      ownerType: String(owner.ownerType || 'Individual').trim() || 'Individual',
+      taxSlabRate:
+        owner.taxSlabRate === '' || owner.taxSlabRate === null || owner.taxSlabRate === undefined
+          ? 0
+          : Number(owner.taxSlabRate),
       aliases: String(owner.aliasesText || '')
         .split(',')
         .map((alias) => alias.trim())
@@ -192,7 +205,10 @@ export default function MastersView({
   const addOwner = () => {
     setFormState((current) => ({
       ...current,
-      owners: [...current.owners, { key: createTempKey(), id: '', name: '', aliasesText: '' }],
+      owners: [
+        ...current.owners,
+        { key: createTempKey(), id: '', name: '', ownerType: 'Individual', taxSlabRate: '', aliasesText: '' },
+      ],
     }))
   }
 
@@ -383,6 +399,32 @@ export default function MastersView({
                           value={owner.name}
                           disabled={isReadOnly}
                           onChange={(event) => updateOwner(owner.key, 'name', event.target.value)}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>Owner type</span>
+                        <select
+                          value={owner.ownerType}
+                          disabled={isReadOnly}
+                          onChange={(event) => updateOwner(owner.key, 'ownerType', event.target.value)}
+                        >
+                          {OWNER_TYPE_OPTIONS.map((ownerType) => (
+                            <option key={ownerType} value={ownerType}>
+                              {ownerType}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="field">
+                        <span>Tax slab %</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={owner.taxSlabRate}
+                          disabled={isReadOnly}
+                          onChange={(event) => updateOwner(owner.key, 'taxSlabRate', event.target.value)}
+                          placeholder="e.g. 30"
                         />
                       </label>
                       <label className="field">

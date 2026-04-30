@@ -239,6 +239,16 @@ export default function DepositEditorView({
                 </select>
               </label>
               <label className="field">
+                <span>Interest calculation frequency</span>
+                <select name="calculationFrequency" value={formValues.calculationFrequency} onChange={handleFormChange}>
+                  <option value="">Auto (product default)</option>
+                  <option value="YEARLY">Yearly</option>
+                  <option value="QUARTERLY">Quarterly</option>
+                  <option value="MONTHLY">Monthly</option>
+                  <option value="SIMPLE">Simple</option>
+                </select>
+              </label>
+              <label className="field">
                 <span>When is interest paid?</span>
                 <select name="payoutMode" value={formValues.payoutMode} onChange={handleFormChange}>
                   <option value="on-maturity">On maturity only</option>

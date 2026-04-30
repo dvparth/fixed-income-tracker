@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react'
 const GOOGLE_SCRIPT_SRC = 'https://accounts.google.com/gsi/client'
 
 let googleScriptPromise = null
+let initializedGoogleClientId = ''
 
 const loadGoogleScript = () => {
   if (globalThis.google?.accounts?.id) {
@@ -50,14 +51,17 @@ export default function AuthView({ onAuthenticate, error, isAuthenticating, them
           return
         }
 
-        globalThis.google.accounts.id.initialize({
-          client_id: googleClientId,
-          callback: ({ credential }) => {
-            if (credential) {
-              onAuthenticate(credential)
-            }
-          },
-        })
+        if (initializedGoogleClientId !== googleClientId) {
+          globalThis.google.accounts.id.initialize({
+            client_id: googleClientId,
+            callback: ({ credential }) => {
+              if (credential) {
+                onAuthenticate(credential)
+              }
+            },
+          })
+          initializedGoogleClientId = googleClientId
+        }
 
         buttonRef.current.innerHTML = ''
         globalThis.google.accounts.id.renderButton(buttonRef.current, {

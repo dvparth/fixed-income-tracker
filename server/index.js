@@ -5,6 +5,7 @@ import express from 'express'
 import mongoose from 'mongoose'
 import multer from 'multer'
 import * as XLSX from 'xlsx'
+import { generateOwnerWiseFYTaxSummary, parseFinancialYearLabel } from '../shared/fyTaxEngine.js'
 import { INVESTMENT_IMPORT_REQUIRED_COLUMNS, INVESTMENT_IMPORT_SHEET_NAME } from '../shared/investmentImport.js'
 import { emptyMasterData, normalizeMasterData } from '../shared/masterData.js'
 
@@ -246,6 +247,17 @@ const toYmd = (date) => {
   return `${year}-${month}-${day}`
 }
 
+const getDateDayCount = (startValue, endValue) => {
+  const start = new Date(`${String(startValue || '').trim()}T00:00:00`)
+  const end = new Date(`${String(endValue || '').trim()}T00:00:00`)
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return 0
+  }
+
+  return Math.max(Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)), 0)
+}
+
 const normalizeImportDate = (value) => {
   if (!value && value !== 0) {
     return ''
@@ -416,6 +428,53 @@ const buildInvestmentIdentityKey = ({
     normalizeText(accountNumber),
     String(investmentDate || '').trim(),
   ].join('|')
+
+const buildTaxEstimationInvestmentInput = (deposit) => {
+  const normalizedInstrumentType = String(deposit.instrumentType || '').trim().toLowerCase()
+  const normalizedPayoutMode = String(deposit.payoutMode || '').trim().toLowerCase()
+  const derivedTenureDays =
+    Number.isFinite(Number(deposit.tenureDays)) && Number(deposit.tenureDays) > 0
+      ? Number(deposit.tenureDays)
+      : getDateDayCount(deposit.investmentDate, deposit.maturityDate)
+  const payoutFrequency =
+    normalizedInstrumentType === 'scss' || normalizedPayoutMode === 'quarterly-fy'
+      ? 'QUARTERLY'
+      : normalizedPayoutMode === 'yearly-fixed' ||
+          (normalizedInstrumentType === 'bond' &&
+            normalizedPayoutMode === 'on-maturity' &&
+            deposit.yearlyPayoutMonthDay)
+        ? 'YEARLY'
+        : 'CUMULATIVE'
+  const explicitCalculationFrequency = String(deposit.calculationFrequency || '').trim().toUpperCase()
+  const shouldPreferQuarterlyCompounding =
+    payoutFrequency === 'CUMULATIVE' && derivedTenureDays >= 365
+  const calculationFrequency =
+    explicitCalculationFrequency && explicitCalculationFrequency !== 'SIMPLE'
+      ? explicitCalculationFrequency
+      : shouldPreferQuarterlyCompounding
+        ? 'QUARTERLY'
+        : explicitCalculationFrequency || 'SIMPLE'
+
+  return {
+    id: String(deposit.id || ''),
+    ownerId: String(deposit.holderName || '').trim(),
+    ownerName: String(deposit.holderName || '').trim(),
+    ownerType: 'Individual',
+    principal: Number(deposit.principalAmount || 0),
+    interestRate: Number(deposit.interestRate || 0),
+    valueDate: deposit.investmentDate,
+    maturityDate: deposit.maturityDate,
+    tenureDays: derivedTenureDays,
+    institutionName: String(deposit.bankName || '').trim(),
+    investmentType: String(deposit.instrumentType || '').trim(),
+    payoutMode: String(deposit.payoutMode || '').trim(),
+    accountNumber: String(deposit.accountNumber || '').trim(),
+    calculationFrequency,
+    payoutFrequency,
+    annualRate: Number(deposit.interestRate || 0),
+    yearlyPayoutMonthDay: String(deposit.yearlyPayoutMonthDay || '').trim(),
+  }
+}
 
 const parseCookies = (request) =>
   String(request.headers.cookie || '')
@@ -1605,6 +1664,24 @@ app.get('/api/master-data', requireAuth, resolvePortfolioContext, async (request
       createIfMissing: request.portfolioContext.isOwner,
     }),
   )
+})
+
+app.get('/api/tax-estimation', requireAuth, resolvePortfolioContext, async (request, response) => {
+  const fy = parseFinancialYearLabel(String(request.query.fy || ''))
+  const [deposits, masterData] = await Promise.all([
+    Deposit.find({ ownerUserId: request.portfolioContext.ownerUserId, isDeleted: { $ne: true } }).lean(),
+    getMasterData(request.portfolioContext.ownerUserId, {
+      createIfMissing: request.portfolioContext.isOwner,
+    }),
+  ])
+
+  const summary = generateOwnerWiseFYTaxSummary(
+    deposits.map((deposit) => buildTaxEstimationInvestmentInput(normalizeDepositDoc(deposit))),
+    fy,
+    masterData.owners || [],
+  )
+
+  response.json(summary)
 })
 
 app.put(

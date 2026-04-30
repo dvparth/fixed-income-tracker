@@ -13,6 +13,7 @@ export const emptyForm = {
   holderName: '',
   fundingSource: '',
   instrumentType: '',
+  calculationFrequency: '',
   payoutMode: 'on-maturity',
   yearlyPayoutMonthDay: '',
   interestPayoutBeforeTds: '',
@@ -82,6 +83,21 @@ export const formatDate = (value) => {
     month: 'short',
     year: 'numeric',
   })
+}
+
+export const getCalculationFrequencyLabel = (value) => {
+  switch (String(value || '').trim().toUpperCase()) {
+    case 'MONTHLY':
+      return 'Monthly'
+    case 'QUARTERLY':
+      return 'Quarterly'
+    case 'YEARLY':
+      return 'Yearly'
+    case 'SIMPLE':
+      return 'Simple'
+    default:
+      return 'Auto (product default)'
+  }
 }
 
 export const formatTenure = (deposit) => {
@@ -291,6 +307,7 @@ export const hydrateDeposit = (deposit) => {
   return Object.assign(
     {
       instrumentType: '',
+      calculationFrequency: '',
       payoutMode: 'on-maturity',
       yearlyPayoutMonthDay: '',
       interestPayoutBeforeTds: '',
@@ -305,6 +322,7 @@ export const hydrateDeposit = (deposit) => {
     deposit,
     {
       instrumentType: deposit.instrumentType || '',
+      calculationFrequency: deposit.calculationFrequency || '',
       payoutMode: deposit.payoutMode || 'on-maturity',
       yearlyPayoutMonthDay: deposit.yearlyPayoutMonthDay || '',
       interestPayoutBeforeTds: deposit.interestPayoutBeforeTds ?? '',
@@ -454,6 +472,7 @@ export const normalizeDeposit = (formValues, existingId, fallbackSrNo, existingD
     holderName,
     fundingSource: formValues.fundingSource.trim(),
     instrumentType: formValues.instrumentType,
+    calculationFrequency: String(formValues.calculationFrequency || '').trim().toUpperCase(),
     payoutMode: formValues.payoutMode,
     yearlyPayoutMonthDay: formValues.yearlyPayoutMonthDay.trim(),
     interestPayoutBeforeTds: parseNumber(formValues.interestPayoutBeforeTds),

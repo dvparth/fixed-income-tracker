@@ -6,6 +6,7 @@ import DepositsView from './features/deposits/DepositsView.jsx'
 import DepositEditorView from './features/editor/DepositEditorView.jsx'
 import MastersView from './features/masters/MastersView.jsx'
 import PortfolioAccessPanel from './features/sharing/PortfolioAccessPanel.jsx'
+import FyTaxView from './features/tax/FyTaxView.jsx'
 import { downloadInvestmentsWorkbook } from './features/admin/exportWorkbook.js'
 import { TODAY, addDays, computeTdsAmount, computeTdsPercent, deriveTenureParts, emptyForm, formatAllocationsText, formatCurrency, formatDate, formatTenure, generateInterestEvents, getCashSettlements, getCurrentFinancialYearRange, getDateSortValue, getEffectivePayoutMode, getFinancialYearLabelFromDate, getFinancialYearRangeFromLabel, getFundingAllocations, getHolderSearchTokens, getMaturitySourceEventId, getPayoutModeLabel, getPostTdsAmount, hydrateDeposit, needsPeriodicPayoutSetup, normalizeDeposit, parseAllocationEntries, requestJson, toYmd } from './features/deposits/depositModel.js'
 import { buildOwnerAliasLookup, emptyMasterData, normalizeMasterData } from '../shared/masterData.js'
@@ -92,6 +93,7 @@ function App() {
   const [sessionState, setSessionState] = useState(createEmptySessionState)
   const [isAuthenticating, setIsAuthenticating] = useState(false)
   const [authError, setAuthError] = useState('')
+  const [brokenAvatarUrl, setBrokenAvatarUrl] = useState('')
   const [themeClass, setThemeClass] = useState(
     () => globalThis.localStorage?.getItem(THEME_STORAGE_KEY) || 'theme-midnight-navy',
   )
@@ -148,6 +150,10 @@ function App() {
   const [activeHelpKey, setActiveHelpKey] = useState(null)
   const currentFinancialYear = useMemo(() => getCurrentFinancialYearRange(TODAY), [])
   const [selectedFinancialYear, setSelectedFinancialYear] = useState(currentFinancialYear.label)
+  const [isTaxViewOpen, setIsTaxViewOpen] = useState(false)
+  const [taxSummary, setTaxSummary] = useState(null)
+  const [isLoadingTaxSummary, setIsLoadingTaxSummary] = useState(false)
+  const [taxSummaryError, setTaxSummaryError] = useState('')
   const activeDeposits = useMemo(
     () => deposits.filter((deposit) => !deposit.isDeleted),
     [deposits],
@@ -297,6 +303,46 @@ function App() {
       isMounted = false
     }
   }, [sessionState.authenticated, sessionState.user?.systemRole])
+
+  useEffect(() => {
+    if (!sessionState.authenticated || !activePortfolioOwnerId || !selectedFinancialYear || !isTaxViewOpen) {
+      return undefined
+    }
+
+    let isMounted = true
+
+    const loadTaxSummary = async () => {
+      try {
+        setIsLoadingTaxSummary(true)
+        setTaxSummaryError('')
+        const nextSummary = await requestJson(
+          buildOwnerScopedPath(
+            `/api/tax-estimation?fy=${encodeURIComponent(selectedFinancialYear)}`,
+            activePortfolioOwnerId,
+          ),
+        )
+
+        if (isMounted) {
+          setTaxSummary(nextSummary)
+        }
+      } catch (error) {
+        if (isMounted) {
+          setTaxSummary(null)
+          setTaxSummaryError(error.message)
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingTaxSummary(false)
+        }
+      }
+    }
+
+    loadTaxSummary()
+
+    return () => {
+      isMounted = false
+    }
+  }, [activePortfolioOwnerId, deposits, isTaxViewOpen, masterData, selectedFinancialYear, sessionState.authenticated])
 
   const deferredSearch = useDeferredValue(searchText)
   const ownerAliasLookup = useMemo(() => buildOwnerAliasLookup(masterData), [masterData])
@@ -903,6 +949,7 @@ function App() {
       holderName: deposit.holderName ?? '',
       fundingSource: deposit.fundingSource ?? '',
       instrumentType: deposit.instrumentType ?? '',
+      calculationFrequency: deposit.calculationFrequency ?? '',
       payoutMode: getEffectivePayoutMode(deposit) ?? 'on-maturity',
       yearlyPayoutMonthDay: deposit.yearlyPayoutMonthDay ?? '',
       interestPayoutBeforeTds: deposit.interestPayoutBeforeTds ?? '',
@@ -949,6 +996,7 @@ function App() {
       holderName: deposit.holderName ?? '',
       fundingSource: deposit.fundingSource ?? '',
       instrumentType: deposit.instrumentType ?? '',
+      calculationFrequency: deposit.calculationFrequency ?? '',
       payoutMode: deposit.payoutMode ?? 'on-maturity',
       yearlyPayoutMonthDay: deposit.yearlyPayoutMonthDay ?? '',
       interestPayoutBeforeTds: deposit.interestPayoutBeforeTds ?? '',
@@ -1992,8 +2040,14 @@ function App() {
                 onClick={() => setIsSettingsOpen((current) => !current)}
                 aria-label="Open settings"
               >
-                {sessionState.user?.photoUrl ? (
-                  <img className="topbar-avatar" src={sessionState.user.photoUrl} alt={sessionState.user.displayName} />
+                {sessionState.user?.photoUrl && sessionState.user.photoUrl !== brokenAvatarUrl ? (
+                  <img
+                    className="topbar-avatar"
+                    src={sessionState.user.photoUrl}
+                    alt={sessionState.user.displayName}
+                    referrerPolicy="no-referrer"
+                    onError={() => setBrokenAvatarUrl(sessionState.user?.photoUrl || '__unknown__')}
+                  />
                 ) : (
                   <div className="topbar-avatar fallback-avatar" aria-hidden="true">
                     {String(sessionState.user?.displayName || sessionState.user?.email || 'Y')
@@ -2051,8 +2105,14 @@ function App() {
           </div>
 
           <div className="settings-profile">
-            {sessionState.user?.photoUrl ? (
-              <img className="settings-avatar" src={sessionState.user.photoUrl} alt={sessionState.user.displayName} />
+            {sessionState.user?.photoUrl && sessionState.user.photoUrl !== brokenAvatarUrl ? (
+              <img
+                className="settings-avatar"
+                src={sessionState.user.photoUrl}
+                alt={sessionState.user.displayName}
+                referrerPolicy="no-referrer"
+                onError={() => setBrokenAvatarUrl(sessionState.user?.photoUrl || '__unknown__')}
+              />
             ) : (
               <div className="settings-avatar fallback-avatar" aria-hidden="true">
                 {String(sessionState.user?.displayName || sessionState.user?.email || 'Y')
@@ -2329,6 +2389,17 @@ function App() {
                 <small>FY {stats.currentFinancialYearLabel} | View schedule</small>
               </article>
             </div>
+
+            <FyTaxView
+              summary={taxSummary}
+              selectedFinancialYear={selectedFinancialYear}
+              isLoading={isLoadingTaxSummary}
+              error={taxSummaryError}
+              formatCurrency={formatCurrency}
+              isOpen={isTaxViewOpen}
+              onOpen={() => setIsTaxViewOpen(true)}
+              onClose={() => setIsTaxViewOpen(false)}
+            />
 
             <article id="dashboard-maturity-section" className="panel">
               <div className="section-head">

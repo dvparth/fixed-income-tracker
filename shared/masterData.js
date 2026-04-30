@@ -1,5 +1,15 @@
 const normalizeText = (value) => String(value || '').trim().toLowerCase()
 
+export const OWNER_TYPE_OPTIONS = [
+  'Individual',
+  'Spouse',
+  'Parent',
+  'Child',
+  'HUF',
+  'Joint',
+  'Other',
+]
+
 const createMasterId = (value) =>
   normalizeText(value)
     .replace(/[^a-z0-9]+/g, '-')
@@ -52,6 +62,8 @@ const normalizeOwners = (owners = []) =>
                 id: createMasterId(name),
                 name,
                 aliases: [],
+                ownerType: 'Individual',
+                taxSlabRate: 0,
               }
             : null
         }
@@ -64,6 +76,12 @@ const normalizeOwners = (owners = []) =>
         return {
           id: String(owner.id || createMasterId(name)).trim(),
           name,
+          ownerType: OWNER_TYPE_OPTIONS.includes(String(owner.ownerType || '').trim())
+            ? String(owner.ownerType || '').trim()
+            : 'Individual',
+          taxSlabRate: Number.isFinite(Number(owner.taxSlabRate))
+            ? Number(owner.taxSlabRate)
+            : 0,
           aliases: Array.from(
             new Set(
               (owner.aliases || [])
@@ -127,3 +145,18 @@ export const buildOwnerAliasLookup = (masterData = emptyMasterData) =>
     )
     return lookup
   }, {})
+
+export const findOwnerMasterRecord = (masterData = emptyMasterData, ownerName = '') => {
+  const normalizedOwnerName = normalizeText(ownerName)
+  if (!normalizedOwnerName) {
+    return null
+  }
+
+  return normalizeMasterData(masterData).owners.find((owner) => {
+    if (normalizeText(owner.name) === normalizedOwnerName) {
+      return true
+    }
+
+    return (owner.aliases || []).some((alias) => normalizeText(alias) === normalizedOwnerName)
+  }) || null
+}
