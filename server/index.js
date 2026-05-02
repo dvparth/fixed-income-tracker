@@ -223,6 +223,49 @@ const buildPortfolioDisplayName = (user, fallbackId) => {
 }
 
 const normalizeText = (value) => String(value || '').trim().toLowerCase()
+const createMasterKey = (value) =>
+  normalizeText(value)
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'item'
+
+const buildMasterNameLookupById = (items = []) =>
+  new Map(
+    items
+      .map((item) => [String(item?.id || '').trim(), String(item?.name || '').trim()])
+      .filter(([id, name]) => id && name),
+  )
+
+const canonicalizeDepositAgainstMasterData = (deposit, masterData = emptyMasterData) => {
+  const ownerLookup = buildMasterNameLookupById(masterData.owners || [])
+  const institutionLookup = buildMasterNameLookupById(masterData.institutions || [])
+  const instrumentTypeLookup = buildMasterNameLookupById(masterData.instrumentTypes || [])
+  const institutionBranchLookup = new Map(
+    (masterData.institutions || []).map((institution) => [
+      String(institution?.id || '').trim(),
+      buildMasterNameLookupById(institution.branches || []),
+    ]),
+  )
+
+  const holderName = ownerLookup.get(createMasterKey(deposit.holderName)) || deposit.holderName
+  const fundingSource =
+    ownerLookup.get(createMasterKey(deposit.fundingSource)) || deposit.fundingSource
+  const institutionId = createMasterKey(deposit.bankName)
+  const bankName = institutionLookup.get(institutionId) || deposit.bankName
+  const branchName =
+    institutionBranchLookup.get(institutionId)?.get(createMasterKey(deposit.branchCity)) ||
+    deposit.branchCity
+  const instrumentType =
+    instrumentTypeLookup.get(createMasterKey(deposit.instrumentType)) || deposit.instrumentType
+
+  return {
+    ...deposit,
+    holderName,
+    fundingSource,
+    bankName,
+    branchCity: branchName,
+    instrumentType,
+  }
+}
 
 const createMasterId = (value) =>
   normalizeText(value)
@@ -406,13 +449,7 @@ const parseStatusValue = (value) => {
   return null
 }
 
-const getEffectivePayoutMode = ({ instrumentType, payoutMode }) => {
-  if (instrumentType === 'SCSS') {
-    return 'quarterly-fy'
-  }
-
-  return payoutMode || 'on-maturity'
-}
+const getEffectivePayoutMode = ({ payoutMode }) => payoutMode || 'on-maturity'
 
 const normalizeImportRowText = (row, column) => String(row?.[column] || '').trim()
 
@@ -430,19 +467,15 @@ const buildInvestmentIdentityKey = ({
   ].join('|')
 
 const buildTaxEstimationInvestmentInput = (deposit) => {
-  const normalizedInstrumentType = String(deposit.instrumentType || '').trim().toLowerCase()
   const normalizedPayoutMode = String(deposit.payoutMode || '').trim().toLowerCase()
   const derivedTenureDays =
     Number.isFinite(Number(deposit.tenureDays)) && Number(deposit.tenureDays) > 0
       ? Number(deposit.tenureDays)
       : getDateDayCount(deposit.investmentDate, deposit.maturityDate)
   const payoutFrequency =
-    normalizedInstrumentType === 'scss' || normalizedPayoutMode === 'quarterly-fy'
+    normalizedPayoutMode === 'quarterly-fy'
       ? 'QUARTERLY'
-      : normalizedPayoutMode === 'yearly-fixed' ||
-          (normalizedInstrumentType === 'bond' &&
-            normalizedPayoutMode === 'on-maturity' &&
-            deposit.yearlyPayoutMonthDay)
+      : normalizedPayoutMode === 'yearly-fixed'
         ? 'YEARLY'
         : 'CUMULATIVE'
   const explicitCalculationFrequency = String(deposit.calculationFrequency || '').trim().toUpperCase()
@@ -714,6 +747,312 @@ const mergeMasterDataForImport = (masterData, additions) => {
     institutions: Array.from(institutionMap.values()),
     instrumentTypes: nextInstrumentTypes,
   })
+}
+
+const buildMasterRenameMap = (previousItems = [], nextItems = []) =>
+  previousItems.reduce((lookup, previousItem) => {
+    const previousId = String(previousItem?.id || '').trim()
+    const previousName = String(previousItem?.name || '').trim()
+    if (!previousId || !previousName) {
+      return lookup
+    }
+
+    const nextMatch = nextItems.find((item) => String(item?.id || '').trim() === previousId)
+    if (!nextMatch) {
+      return lookup
+    }
+
+    const nextName = String(nextMatch.name || '').trim()
+    if (!nextName || nextName === previousName) {
+      return lookup
+    }
+
+    lookup[previousName] = nextName
+    return lookup
+  }, {})
+
+const buildDeletedMasterItems = (previousItems = [], nextItems = []) => {
+  const nextIds = new Set(nextItems.map((item) => String(item?.id || '').trim()).filter(Boolean))
+
+  return previousItems.filter((item) => {
+    const previousId = String(item?.id || '').trim()
+    return previousId && !nextIds.has(previousId)
+  })
+}
+
+const buildBranchRenameEffects = (previousInstitutions = [], nextInstitutions = []) =>
+  previousInstitutions.flatMap((previousInstitution) => {
+    const previousInstitutionId = String(previousInstitution?.id || '').trim()
+    const previousInstitutionName = String(previousInstitution?.name || '').trim()
+    if (!previousInstitutionId || !previousInstitutionName) {
+      return []
+    }
+
+    const nextInstitution = nextInstitutions.find(
+      (institution) => String(institution?.id || '').trim() === previousInstitutionId,
+    )
+    if (!nextInstitution) {
+      return []
+    }
+
+    const nextInstitutionName = String(nextInstitution.name || '').trim()
+    const nextBranches = nextInstitution.branches || []
+
+    return (previousInstitution.branches || []).flatMap((previousBranch) => {
+      const previousBranchId = String(previousBranch?.id || '').trim()
+      const previousBranchName = String(previousBranch?.name || '').trim()
+      if (!previousBranchId || !previousBranchName) {
+        return []
+      }
+
+      const nextBranch = nextBranches.find(
+        (branch) => String(branch?.id || '').trim() === previousBranchId,
+      )
+      if (!nextBranch) {
+        return []
+      }
+
+      const nextBranchName = String(nextBranch.name || '').trim()
+      if (
+        !nextBranchName ||
+        (nextBranchName === previousBranchName && nextInstitutionName === previousInstitutionName)
+      ) {
+        return []
+      }
+
+      return [
+        {
+          institutionNameFrom: previousInstitutionName,
+          institutionNameTo: nextInstitutionName || previousInstitutionName,
+          branchNameFrom: previousBranchName,
+          branchNameTo: nextBranchName,
+        },
+      ]
+    })
+  })
+
+const findMasterReferenceViolations = (deposits, previousMasterData, nextMasterData) => {
+  const violations = []
+
+  buildDeletedMasterItems(previousMasterData.instrumentTypes || [], nextMasterData.instrumentTypes || []).forEach(
+    (instrumentType) => {
+      const name = String(instrumentType.name || '').trim()
+      const referencedCount = deposits.filter((deposit) => String(deposit.instrumentType || '').trim() === name).length
+      if (referencedCount > 0) {
+        violations.push(`Instrument type "${name}" is used by ${referencedCount} investment${referencedCount === 1 ? '' : 's'}.`)
+      }
+    },
+  )
+
+  buildDeletedMasterItems(previousMasterData.owners || [], nextMasterData.owners || []).forEach((owner) => {
+    const name = String(owner.name || '').trim()
+    const referencedCount = deposits.filter(
+      (deposit) =>
+        String(deposit.holderName || '').trim() === name ||
+        String(deposit.fundingSource || '').trim() === name,
+    ).length
+    if (referencedCount > 0) {
+      violations.push(`Owner "${name}" is used by ${referencedCount} investment${referencedCount === 1 ? '' : 's'}.`)
+    }
+  })
+
+  buildDeletedMasterItems(previousMasterData.institutions || [], nextMasterData.institutions || []).forEach(
+    (institution) => {
+      const name = String(institution.name || '').trim()
+      const referencedCount = deposits.filter((deposit) => String(deposit.bankName || '').trim() === name).length
+      if (referencedCount > 0) {
+        violations.push(`Institution "${name}" is used by ${referencedCount} investment${referencedCount === 1 ? '' : 's'}.`)
+      }
+    },
+  )
+
+  ;(previousMasterData.institutions || []).forEach((previousInstitution) => {
+    const previousInstitutionId = String(previousInstitution?.id || '').trim()
+    const previousInstitutionName = String(previousInstitution?.name || '').trim()
+    if (!previousInstitutionId || !previousInstitutionName) {
+      return
+    }
+
+    const nextInstitution = (nextMasterData.institutions || []).find(
+      (institution) => String(institution?.id || '').trim() === previousInstitutionId,
+    )
+    if (!nextInstitution) {
+      return
+    }
+
+    buildDeletedMasterItems(previousInstitution.branches || [], nextInstitution.branches || []).forEach((branch) => {
+      const branchName = String(branch.name || '').trim()
+      const referencedCount = deposits.filter(
+        (deposit) =>
+          String(deposit.bankName || '').trim() === previousInstitutionName &&
+          String(deposit.branchCity || '').trim() === branchName,
+      ).length
+      if (referencedCount > 0) {
+        violations.push(
+          `Branch "${branchName}" under "${previousInstitutionName}" is used by ${referencedCount} investment${referencedCount === 1 ? '' : 's'}.`,
+        )
+      }
+    })
+  })
+
+  return violations
+}
+
+const toRenameEntries = (renameMap = {}) =>
+  Object.entries(renameMap).filter(
+    ([previousName, nextName]) => previousName && nextName && previousName !== nextName,
+  )
+
+const propagateMasterRenames = async (
+  ownerUserId,
+  {
+    ownerRenameMap = {},
+    institutionRenameMap = {},
+    instrumentTypeRenameMap = {},
+    branchRenameEffects = [],
+  } = {},
+) => {
+  const ownerRenameEntries = toRenameEntries(ownerRenameMap)
+  const institutionRenameEntries = toRenameEntries(institutionRenameMap)
+  const instrumentTypeRenameEntries = toRenameEntries(instrumentTypeRenameMap)
+  const normalizedBranchRenames = branchRenameEffects.filter(
+    (effect) =>
+      effect?.institutionNameFrom &&
+      effect?.institutionNameTo &&
+      effect?.branchNameFrom &&
+      effect?.branchNameTo &&
+      (effect.branchNameFrom !== effect.branchNameTo ||
+        effect.institutionNameFrom !== effect.institutionNameTo),
+  )
+
+  if (
+    ownerRenameEntries.length === 0 &&
+    institutionRenameEntries.length === 0 &&
+    instrumentTypeRenameEntries.length === 0 &&
+    normalizedBranchRenames.length === 0
+  ) {
+    return 0
+  }
+
+  const result = await Deposit.bulkWrite(
+    [
+      ...ownerRenameEntries.flatMap(([previousName, nextName]) => [
+        {
+          updateMany: {
+            filter: {
+              ownerUserId,
+              isDeleted: { $ne: true },
+              holderName: previousName,
+            },
+            update: {
+              $set: {
+                holderName: nextName,
+              },
+            },
+          },
+        },
+        {
+          updateMany: {
+            filter: {
+              ownerUserId,
+              isDeleted: { $ne: true },
+              fundingSource: previousName,
+            },
+            update: {
+              $set: {
+                fundingSource: nextName,
+              },
+            },
+          },
+        },
+      ]),
+      ...institutionRenameEntries.map(([previousName, nextName]) => ({
+        updateMany: {
+          filter: {
+            ownerUserId,
+            isDeleted: { $ne: true },
+            bankName: previousName,
+          },
+          update: {
+            $set: {
+              bankName: nextName,
+            },
+          },
+        },
+      })),
+      ...instrumentTypeRenameEntries.map(([previousName, nextName]) => ({
+        updateMany: {
+          filter: {
+            ownerUserId,
+            isDeleted: { $ne: true },
+            instrumentType: previousName,
+          },
+          update: {
+            $set: {
+              instrumentType: nextName,
+            },
+          },
+        },
+      })),
+      ...normalizedBranchRenames.map((effect) => ({
+        updateMany: {
+          filter: {
+            ownerUserId,
+            isDeleted: { $ne: true },
+            bankName: { $in: [effect.institutionNameFrom, effect.institutionNameTo] },
+            branchCity: effect.branchNameFrom,
+          },
+          update: {
+            $set: {
+              bankName: effect.institutionNameTo,
+              branchCity: effect.branchNameTo,
+            },
+          },
+        },
+      })),
+    ],
+    { ordered: true },
+  )
+
+  return Number(result.modifiedCount || 0)
+}
+
+const reconcileDepositsWithMasterData = async (ownerUserId, masterData) => {
+  const deposits = await Deposit.find({
+    ownerUserId,
+    isDeleted: { $ne: true },
+  }).lean()
+
+  const updates = deposits
+    .map((deposit) => {
+      const canonical = canonicalizeDepositAgainstMasterData(deposit, masterData)
+      const changes = {}
+
+      ;['holderName', 'fundingSource', 'bankName', 'branchCity', 'instrumentType'].forEach(
+        (field) => {
+          if (String(canonical[field] || '') !== String(deposit[field] || '')) {
+            changes[field] = canonical[field]
+          }
+        },
+      )
+
+      return Object.keys(changes).length > 0
+        ? {
+            updateOne: {
+              filter: { _id: deposit._id },
+              update: { $set: changes },
+            },
+          }
+        : null
+    })
+    .filter(Boolean)
+
+  if (updates.length === 0) {
+    return 0
+  }
+
+  const result = await Deposit.bulkWrite(updates, { ordered: true })
+  return Number(result.modifiedCount || 0)
 }
 
 const buildImportMasterChanges = (rows, masterData) => {
@@ -1654,8 +1993,17 @@ app.post(
 )
 
 app.get('/api/deposits', requireAuth, resolvePortfolioContext, async (request, response) => {
-  const deposits = await Deposit.find({ ownerUserId: request.portfolioContext.ownerUserId }).lean()
-  response.json(deposits.map(normalizeDepositDoc))
+  const [deposits, masterData] = await Promise.all([
+    Deposit.find({ ownerUserId: request.portfolioContext.ownerUserId }).lean(),
+    getMasterData(request.portfolioContext.ownerUserId, {
+      createIfMissing: request.portfolioContext.isOwner,
+    }),
+  ])
+  response.json(
+    deposits.map((deposit) =>
+      canonicalizeDepositAgainstMasterData(normalizeDepositDoc(deposit), masterData),
+    ),
+  )
 })
 
 app.get('/api/master-data', requireAuth, resolvePortfolioContext, async (request, response) => {
@@ -1694,6 +2042,37 @@ app.put(
     const previous = await MasterData.findOne({
       ownerUserId: request.portfolioContext.ownerUserId,
     }).lean()
+    const previousNormalized = previous ? normalizeMasterData(previous) : emptyMasterData
+    const deposits = await Deposit.find({
+      ownerUserId: request.portfolioContext.ownerUserId,
+      isDeleted: { $ne: true },
+    }).lean()
+    const referenceViolations = findMasterReferenceViolations(
+      deposits,
+      previousNormalized,
+      normalized,
+    )
+
+    if (referenceViolations.length > 0) {
+      response.status(400).json({
+        error: `Cannot delete referenced master data. ${referenceViolations.join(' ')}`,
+      })
+      return
+    }
+
+    const ownerRenameMap = buildMasterRenameMap(previousNormalized.owners || [], normalized.owners || [])
+    const institutionRenameMap = buildMasterRenameMap(
+      previousNormalized.institutions || [],
+      normalized.institutions || [],
+    )
+    const instrumentTypeRenameMap = buildMasterRenameMap(
+      previousNormalized.instrumentTypes || [],
+      normalized.instrumentTypes || [],
+    )
+    const branchRenameEffects = buildBranchRenameEffects(
+      previousNormalized.institutions || [],
+      normalized.institutions || [],
+    )
     const updated = await MasterData.findOneAndUpdate(
       { ownerUserId: request.portfolioContext.ownerUserId },
       {
@@ -1702,6 +2081,20 @@ app.put(
       },
       { new: true, upsert: true, setDefaultsOnInsert: true },
     ).lean()
+    const updatedNormalized = normalizeMasterData(updated)
+    const renamedDepositCount = await propagateMasterRenames(
+      request.portfolioContext.ownerUserId,
+      {
+        ownerRenameMap,
+        institutionRenameMap,
+        instrumentTypeRenameMap,
+        branchRenameEffects,
+      },
+    )
+    const reconciledDepositCount = await reconcileDepositsWithMasterData(
+      request.portfolioContext.ownerUserId,
+      updatedNormalized,
+    )
 
     await writeAdminAuditLog({
       actor: request.sessionUser,
@@ -1709,11 +2102,32 @@ app.put(
       targetType: 'masterData',
       targetRecordId: String(updated._id),
       targetOwnerUserId: request.portfolioContext.ownerUserId,
-      before: previous ? normalizeMasterData(previous) : null,
-      after: normalizeMasterData(updated),
+      before: previous ? previousNormalized : null,
+      after: updatedNormalized,
+      metadata:
+        renamedDepositCount > 0 || reconciledDepositCount > 0
+          ? {
+              renamedDepositCount,
+              reconciledDepositCount,
+              ownerRenameMap,
+              institutionRenameMap,
+              instrumentTypeRenameMap,
+              branchRenameEffects,
+            }
+          : undefined,
     })
 
-    response.json(normalizeMasterData(updated))
+    response.json({
+      ...updatedNormalized,
+      renameEffects: {
+        owners: ownerRenameMap,
+        institutions: institutionRenameMap,
+        instrumentTypes: instrumentTypeRenameMap,
+        branches: branchRenameEffects,
+        renamedDepositCount,
+        reconciledDepositCount,
+      },
+    })
   },
 )
 

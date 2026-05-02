@@ -186,15 +186,11 @@ export const normalizeInterestAccrualConfig = (config = {}) => {
     config.interestPayoutFrequency || config.payoutFrequency,
   )
   const payoutMode = normalizeText(config.payoutMode)
-  const investmentType = normalizeText(config.investmentType)
   const derivedPayoutFrequency =
     explicitPayoutFrequency ||
-    (investmentType === 'scss' || payoutMode === 'quarterly-fy'
+    (payoutMode === 'quarterly-fy'
       ? 'QUARTERLY'
-      : payoutMode === 'yearly-fixed' ||
-          (investmentType === 'bond' &&
-            payoutMode === 'on-maturity' &&
-            config.yearlyPayoutMonthDay)
+      : payoutMode === 'yearly-fixed'
         ? 'YEARLY'
         : 'CUMULATIVE')
   const explicitCalculationFrequency = normalizeCalculationFrequency(

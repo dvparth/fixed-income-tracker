@@ -5,7 +5,7 @@ const getBehaviorMode = (payoutMode) => (payoutMode === 'on-maturity' ? 'cumulat
 const getProductBehaviorLabel = (payoutMode) =>
   payoutMode === 'on-maturity' ? 'Cumulative' : 'Payout'
 
-const getCompoundingFrequencyLabel = (value, instrumentType) => {
+const getCompoundingFrequencyLabel = (value) => {
   const normalized = String(value || '').trim().toUpperCase()
 
   if (normalized === 'YEARLY') {
@@ -21,7 +21,7 @@ const getCompoundingFrequencyLabel = (value, instrumentType) => {
     return 'Quarterly compounding'
   }
 
-  return instrumentType === 'NSC' ? 'Yearly compounding' : 'Quarterly compounding'
+  return 'Auto (product default)'
 }
 
 const buildSuggestedFundingSources = (fundingSourceOptions) =>
@@ -137,12 +137,6 @@ export default function DepositEditorView({
   const applyBehaviorMode = (nextBehaviorMode) => {
     if (nextBehaviorMode === 'cumulative') {
       triggerFormChange('payoutMode', 'on-maturity')
-      if (!String(formValues.calculationFrequency || '').trim()) {
-        triggerFormChange(
-          'calculationFrequency',
-          formValues.instrumentType === 'NSC' ? 'YEARLY' : 'QUARTERLY',
-        )
-      }
       return
     }
 
@@ -150,12 +144,6 @@ export default function DepositEditorView({
       'payoutMode',
       effectiveEditorPayoutMode === 'yearly-fixed' ? 'yearly-fixed' : 'quarterly-fy',
     )
-    if (!String(formValues.calculationFrequency || '').trim()) {
-      triggerFormChange(
-        'calculationFrequency',
-        formValues.instrumentType === 'NSC' ? 'YEARLY' : 'QUARTERLY',
-      )
-    }
   }
 
   const handleSuggestedFundingSource = (eventId) => {
@@ -215,7 +203,7 @@ export default function DepositEditorView({
               <span>Product behavior</span>
               <strong>{getProductBehaviorLabel(effectiveEditorPayoutMode)}</strong>
               <small>
-                {getCompoundingFrequencyLabel(formValues.calculationFrequency, formValues.instrumentType)}
+                {getCompoundingFrequencyLabel(formValues.calculationFrequency)}
                 {' • '}
                 {effectiveEditorPayoutMode === 'on-maturity'
                   ? 'Paid at maturity'

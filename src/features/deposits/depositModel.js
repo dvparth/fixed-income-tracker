@@ -371,21 +371,7 @@ export const getPayoutModeLabel = (deposit) => {
   return 'On maturity only'
 }
 
-export const getEffectivePayoutMode = (deposit) => {
-  if (deposit.instrumentType === 'SCSS') {
-    return 'quarterly-fy'
-  }
-
-  if (
-    deposit.instrumentType === 'Bond' &&
-    deposit.payoutMode === 'on-maturity' &&
-    deposit.yearlyPayoutMonthDay
-  ) {
-    return 'yearly-fixed'
-  }
-
-  return deposit.payoutMode
-}
+export const getEffectivePayoutMode = (deposit) => deposit.payoutMode || 'on-maturity'
 
 export const needsPeriodicPayoutSetup = (deposit) =>
   getEffectivePayoutMode(deposit) !== 'on-maturity' &&

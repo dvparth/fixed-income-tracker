@@ -89,6 +89,56 @@ const getDateFilterTime = (value, boundary = 'start') => {
   return date.getTime()
 }
 
+const createMasterKey = (value) =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'item'
+
+const canonicalizeDepositsAgainstMasterData = (depositList, currentMasterData) => {
+  const ownerLookup = new Map(
+    (currentMasterData.owners || [])
+      .map((owner) => [String(owner?.id || '').trim(), String(owner?.name || '').trim()])
+      .filter(([id, name]) => id && name),
+  )
+  const institutionLookup = new Map(
+    (currentMasterData.institutions || [])
+      .map((institution) => [
+        String(institution?.id || '').trim(),
+        {
+          name: String(institution?.name || '').trim(),
+          branches: new Map(
+            (institution.branches || [])
+              .map((branch) => [String(branch?.id || '').trim(), String(branch?.name || '').trim()])
+              .filter(([id, name]) => id && name),
+          ),
+        },
+      ])
+      .filter(([id, value]) => id && value.name),
+  )
+  const instrumentLookup = new Map(
+    (currentMasterData.instrumentTypes || [])
+      .map((instrument) => [String(instrument?.id || '').trim(), String(instrument?.name || '').trim()])
+      .filter(([id, name]) => id && name),
+  )
+
+  return depositList.map((deposit) => {
+    const institutionEntry = institutionLookup.get(createMasterKey(deposit.bankName))
+    return {
+      ...deposit,
+      holderName: ownerLookup.get(createMasterKey(deposit.holderName)) || deposit.holderName,
+      fundingSource:
+        ownerLookup.get(createMasterKey(deposit.fundingSource)) || deposit.fundingSource,
+      bankName: institutionEntry?.name || deposit.bankName,
+      branchCity:
+        institutionEntry?.branches.get(createMasterKey(deposit.branchCity)) || deposit.branchCity,
+      instrumentType:
+        instrumentLookup.get(createMasterKey(deposit.instrumentType)) || deposit.instrumentType,
+    }
+  })
+}
+
 function App() {
   const [sessionState, setSessionState] = useState(createEmptySessionState)
   const [isAuthenticating, setIsAuthenticating] = useState(false)
@@ -129,7 +179,6 @@ function App() {
   const [editingId, setEditingId] = useState(null)
   const [formValues, setFormValues] = useState(emptyForm)
   const [formErrors, setFormErrors] = useState({})
-  const setIsMobileNavOpen = () => {}
   const [selectedFundingEventId, setSelectedFundingEventId] = useState('')
   const [fundingAmountDraft, setFundingAmountDraft] = useState('')
   const [archiveTargetId, setArchiveTargetId] = useState(null)
@@ -242,9 +291,13 @@ function App() {
           return
         }
 
-        const nextDeposits = depositsData.map(hydrateDeposit)
+        const nextMasterData = normalizeMasterData(masterDataResponse)
+        const nextDeposits = canonicalizeDepositsAgainstMasterData(
+          depositsData.map(hydrateDeposit),
+          nextMasterData,
+        )
         setDeposits(nextDeposits)
-        setMasterData(normalizeMasterData(masterDataResponse))
+        setMasterData(nextMasterData)
         setSelectedId((current) =>
           current && nextDeposits.some((deposit) => deposit.id === current)
             ? current
@@ -970,6 +1023,36 @@ function App() {
     setDeleteTargetId(null)
   }
 
+  const mapDepositToFormValues = (deposit) => ({
+    srNo: deposit.srNo ?? '',
+    bankName: deposit.bankName ?? '',
+    branchCity: deposit.branchCity ?? '',
+    holderName: deposit.holderName ?? '',
+    fundingSource: deposit.fundingSource ?? '',
+    instrumentType: deposit.instrumentType ?? '',
+    calculationFrequency: deposit.calculationFrequency ?? '',
+    payoutMode: getEffectivePayoutMode(deposit) ?? 'on-maturity',
+    yearlyPayoutMonthDay: deposit.yearlyPayoutMonthDay ?? '',
+    interestPayoutBeforeTds: deposit.interestPayoutBeforeTds ?? '',
+    interestPayoutAfterTds: deposit.interestPayoutAfterTds ?? '',
+    accountNumber: deposit.accountNumber ?? '',
+    tenureYears: deposit.tenureYears ?? '',
+    tenureMonths: deposit.tenureMonths ?? '',
+    tenureDays: deposit.tenureDays ?? '',
+    interestRate: formatEditableNumber(deposit.interestRate),
+    principalAmount: deposit.principalAmount ?? '',
+    investmentDate: deposit.investmentDate ?? '',
+    maturityDate: deposit.maturityDate ?? '',
+    maturityBeforeTax: deposit.maturityBeforeTax ?? '',
+    maturityAfterTax: deposit.maturityAfterTax ?? '',
+    totalInterestEarned: deposit.totalInterestEarned ?? '',
+    tdsPercent: deposit.tdsPercent ?? '',
+    tdsAmount: deposit.tdsAmount ?? '',
+    status: deposit.status ?? 'Open',
+    allocationsText: formatAllocationsText(getFundingAllocations(deposit)),
+    notes: deposit.notes ?? '',
+  })
+
   const startNewDeposit = () => {
     if (!canEditPortfolio) {
       return
@@ -979,7 +1062,6 @@ function App() {
     setEditorReturnDepositsScreen(mobileDepositsScreen)
     setActiveTab('editor')
     setMobileDepositsScreen('list')
-    setIsMobileNavOpen(false)
     setInterestFocusMode('all')
     setMaturityFocusMode('all')
     resetForm()
@@ -994,16 +1076,36 @@ function App() {
       setIsSavingMasters(true)
       setMastersFeedback(null)
       setLoadError('')
-      const savedMasterData = normalizeMasterData(
-        await requestJson(buildOwnerScopedPath('/api/master-data', activePortfolioOwnerId), {
+      const masterDataResponse = await requestJson(
+        buildOwnerScopedPath('/api/master-data', activePortfolioOwnerId),
+        {
           method: 'PUT',
           body: JSON.stringify(nextMasterData),
-        }),
+        },
+      )
+      const savedMasterData = normalizeMasterData(masterDataResponse)
+      const refreshedDepositsResponse = await requestJson(
+        buildOwnerScopedPath('/api/deposits', activePortfolioOwnerId),
+      )
+      const refreshedDeposits = canonicalizeDepositsAgainstMasterData(
+        refreshedDepositsResponse.map(hydrateDeposit),
+        savedMasterData,
       )
       setMasterData(savedMasterData)
+      setDeposits(refreshedDeposits)
+      if (editingId) {
+        const refreshedEditingDeposit = refreshedDeposits.find((deposit) => deposit.id === editingId)
+        if (refreshedEditingDeposit) {
+          setFormValues(mapDepositToFormValues(refreshedEditingDeposit))
+        }
+      }
+      const renameEffectCount = Number(masterDataResponse?.renameEffects?.renamedDepositCount || 0)
       setMastersFeedback({
         type: 'success',
-        message: 'Master data saved.',
+        message:
+          renameEffectCount > 0
+            ? 'Master data saved. Existing investments were updated to match renamed master values.'
+            : 'Master data saved.',
       })
       if (mastersReturnTarget === 'editor') {
         setActiveTab('editor')
@@ -1028,42 +1130,13 @@ function App() {
     setEditorReturnDepositsScreen(mobileDepositsScreen)
     setActiveTab('editor')
     setMobileDepositsScreen('list')
-    setIsMobileNavOpen(false)
     setInterestFocusMode('all')
     setMaturityFocusMode('all')
     setEditingId(deposit.id)
     setFormErrors({})
     setSelectedFundingEventId('')
     setFundingAmountDraft('')
-    setFormValues({
-      srNo: deposit.srNo ?? '',
-      bankName: deposit.bankName ?? '',
-      branchCity: deposit.branchCity ?? '',
-      holderName: deposit.holderName ?? '',
-      fundingSource: deposit.fundingSource ?? '',
-      instrumentType: deposit.instrumentType ?? '',
-      calculationFrequency: deposit.calculationFrequency ?? '',
-      payoutMode: getEffectivePayoutMode(deposit) ?? 'on-maturity',
-      yearlyPayoutMonthDay: deposit.yearlyPayoutMonthDay ?? '',
-      interestPayoutBeforeTds: deposit.interestPayoutBeforeTds ?? '',
-      interestPayoutAfterTds: deposit.interestPayoutAfterTds ?? '',
-      accountNumber: deposit.accountNumber ?? '',
-      tenureYears: deposit.tenureYears ?? '',
-      tenureMonths: deposit.tenureMonths ?? '',
-      tenureDays: deposit.tenureDays ?? '',
-      interestRate: formatEditableNumber(deposit.interestRate),
-      principalAmount: deposit.principalAmount ?? '',
-      investmentDate: deposit.investmentDate ?? '',
-      maturityDate: deposit.maturityDate ?? '',
-      maturityBeforeTax: deposit.maturityBeforeTax ?? '',
-      maturityAfterTax: deposit.maturityAfterTax ?? '',
-      totalInterestEarned: deposit.totalInterestEarned ?? '',
-      tdsPercent: deposit.tdsPercent ?? '',
-      tdsAmount: deposit.tdsAmount ?? '',
-      status: deposit.status ?? 'Open',
-      allocationsText: formatAllocationsText(getFundingAllocations(deposit)),
-      notes: deposit.notes ?? '',
-    })
+    setFormValues(mapDepositToFormValues(deposit))
   }
 
   const startCloning = (deposit) => {
@@ -1075,7 +1148,6 @@ function App() {
     setEditorReturnDepositsScreen(mobileDepositsScreen)
     setActiveTab('editor')
     setMobileDepositsScreen('list')
-    setIsMobileNavOpen(false)
     setInterestFocusMode('all')
     setMaturityFocusMode('all')
     setEditingId(null)
@@ -1129,11 +1201,10 @@ function App() {
       maturity: false,
       interest: false,
     })
-    setIsMobileNavOpen(false)
     setInterestFocusMode('all')
-      setMaturityFocusMode('all')
-      setActiveTab('deposits')
-    }
+    setMaturityFocusMode('all')
+    setActiveTab('deposits')
+  }
 
   const openDepositDrilldown = (depositId, searchTextValue = '') => {
     setSearchScope('all')
@@ -1146,7 +1217,6 @@ function App() {
       maturity: false,
       interest: false,
     })
-    setIsMobileNavOpen(false)
     setInterestFocusMode('all')
     setMaturityFocusMode('all')
     setActiveTab('deposits')
@@ -1323,7 +1393,6 @@ function App() {
     setMastersReturnTarget('editor')
     setMastersFeedback(null)
     setActiveTab('masters')
-    setIsMobileNavOpen(false)
   }
 
   const handleMasterBoundFieldChange = (event) => {
@@ -1410,10 +1479,7 @@ function App() {
       return
     }
 
-    const effectiveFormValues =
-      formValues.instrumentType === 'SCSS' && formValues.payoutMode !== 'quarterly-fy'
-        ? { ...formValues, payoutMode: 'quarterly-fy' }
-        : formValues
+    const effectiveFormValues = formValues
 
     const nextErrors = {}
 
@@ -1791,10 +1857,7 @@ function App() {
     setMobileDepositsScreen('list')
   }
 
-  const effectiveEditorPayoutMode =
-    formValues.instrumentType === 'SCSS' && formValues.payoutMode !== 'quarterly-fy'
-      ? 'quarterly-fy'
-      : formValues.payoutMode
+  const effectiveEditorPayoutMode = formValues.payoutMode
 
   const isPeriodicEditor = effectiveEditorPayoutMode !== 'on-maturity'
   const fundingEntries = parseAllocationEntries(formValues.allocationsText)
@@ -1904,7 +1967,6 @@ function App() {
       .sort((left, right) => new Date(left.date) - new Date(right.date))
 
   const leaveEditorScreen = () => {
-    setIsMobileNavOpen(false)
     setActiveTab(editorReturnTab === 'editor' ? 'dashboard' : editorReturnTab)
     if (editorReturnTab === 'deposits') {
       setMobileDepositsScreen(editorReturnDepositsScreen)
@@ -2016,7 +2078,6 @@ function App() {
     }
 
     setActiveTab('admin')
-    setIsMobileNavOpen(false)
   }
 
   const handleDownloadWorkbook = async () => {
@@ -2151,7 +2212,6 @@ function App() {
                       if (value === 'deposits') {
                         setMobileDepositsScreen('list')
                       }
-                      setIsMobileNavOpen(false)
                     }}
                   >
                     {label}
