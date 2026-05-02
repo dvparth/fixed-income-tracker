@@ -8,6 +8,7 @@ import * as XLSX from 'xlsx'
 import { generateOwnerWiseFYTaxSummary, parseFinancialYearLabel } from '../shared/fyTaxEngine.js'
 import { INVESTMENT_IMPORT_REQUIRED_COLUMNS, INVESTMENT_IMPORT_SHEET_NAME } from '../shared/investmentImport.js'
 import { emptyMasterData, normalizeMasterData } from '../shared/masterData.js'
+import { BACKUP_DEPOSIT_JSON_COLUMN, BACKUP_SHEETS, BACKUP_WORKBOOK_VERSION } from '../shared/systemBackup.js'
 
 dotenv.config()
 
@@ -747,6 +748,521 @@ const mergeMasterDataForImport = (masterData, additions) => {
     institutions: Array.from(institutionMap.values()),
     instrumentTypes: nextInstrumentTypes,
   })
+}
+
+const toBackupDateStamp = (date = new Date()) => {
+  const year = date.getFullYear()
+  const month = `${date.getMonth() + 1}`.padStart(2, '0')
+  const day = `${date.getDate()}`.padStart(2, '0')
+  const hours = `${date.getHours()}`.padStart(2, '0')
+  const minutes = `${date.getMinutes()}`.padStart(2, '0')
+  return `${year}${month}${day}-${hours}${minutes}`
+}
+
+const sanitizeBackupFilenamePart = (value, fallback = 'portfolio') => {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+
+  return normalized || fallback
+}
+
+const buildBackupFilename = (portfolioLabel, prefix = 'yieldflow-backup') =>
+  `${prefix}-${sanitizeBackupFilenamePart(portfolioLabel)}-${toBackupDateStamp()}.xlsx`
+
+const roundBackupNumber = (value, digits = 2) => {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) {
+    return value
+  }
+
+  return Number(numeric.toFixed(digits))
+}
+
+const sanitizeDepositForBackupExport = (deposit) => ({
+  ...deposit,
+  interestRate: roundBackupNumber(deposit.interestRate, 2),
+  principalAmount: roundBackupNumber(deposit.principalAmount, 2),
+  maturityBeforeTax: roundBackupNumber(deposit.maturityBeforeTax, 2),
+  maturityAfterTax:
+    deposit.maturityAfterTax === '' || deposit.maturityAfterTax === null || deposit.maturityAfterTax === undefined
+      ? deposit.maturityAfterTax
+      : roundBackupNumber(deposit.maturityAfterTax, 2),
+  totalInterestEarned: roundBackupNumber(deposit.totalInterestEarned, 2),
+  tdsPercent: roundBackupNumber(deposit.tdsPercent, 2),
+  tdsAmount: roundBackupNumber(deposit.tdsAmount, 2),
+  interestPayoutBeforeTds:
+    deposit.interestPayoutBeforeTds === '' || deposit.interestPayoutBeforeTds === null || deposit.interestPayoutBeforeTds === undefined
+      ? deposit.interestPayoutBeforeTds
+      : roundBackupNumber(deposit.interestPayoutBeforeTds, 2),
+  interestPayoutAfterTds:
+    deposit.interestPayoutAfterTds === '' || deposit.interestPayoutAfterTds === null || deposit.interestPayoutAfterTds === undefined
+      ? deposit.interestPayoutAfterTds
+      : roundBackupNumber(deposit.interestPayoutAfterTds, 2),
+  allocations: Array.isArray(deposit.allocations)
+    ? deposit.allocations.map((allocation) => ({
+        ...allocation,
+        amount: roundBackupNumber(allocation.amount, 2),
+      }))
+    : [],
+  cashSettlements: Array.isArray(deposit.cashSettlements)
+    ? deposit.cashSettlements.map((settlement) => ({
+        ...settlement,
+        amount: roundBackupNumber(settlement.amount, 2),
+      }))
+    : [],
+})
+
+const buildBackupWorkbookBuffer = ({ portfolioLabel, ownerUserId, deposits, masterData }) => {
+  const workbook = XLSX.utils.book_new()
+  const exportedAt = new Date().toISOString()
+  const normalizedMasterData = normalizeMasterData(masterData)
+  const normalizedDeposits = deposits.map((deposit) => {
+    const normalized = normalizeDepositDoc(deposit)
+    const snapshot = { ...normalized }
+    delete snapshot._id
+    delete snapshot.__v
+    return sanitizeDepositForBackupExport(snapshot)
+  })
+
+  const metadataRows = [
+    { Field: 'Backup type', Value: 'YieldFlow full backup' },
+    { Field: 'Workbook version', Value: BACKUP_WORKBOOK_VERSION },
+    { Field: 'Exported at', Value: exportedAt },
+    { Field: 'Portfolio label', Value: portfolioLabel },
+    { Field: 'Portfolio owner user ID', Value: ownerUserId },
+    { Field: 'Investment count', Value: normalizedDeposits.length },
+    { Field: 'Owner count', Value: (normalizedMasterData.owners || []).length },
+    { Field: 'Institution count', Value: (normalizedMasterData.institutions || []).length },
+    { Field: 'Instrument type count', Value: (normalizedMasterData.instrumentTypes || []).length },
+  ]
+
+  const ownerRows = (normalizedMasterData.owners || []).map((owner) => ({
+    ID: owner.id,
+    Name: owner.name,
+    Type: owner.ownerType || '',
+    'Tax %': Number(owner.taxSlabRate || 0),
+    Aliases: (owner.aliases || []).join(' | '),
+  }))
+
+  const institutionRows = (normalizedMasterData.institutions || []).map((institution) => ({
+    ID: institution.id,
+    Name: institution.name,
+  }))
+
+  const branchRows = (normalizedMasterData.institutions || []).flatMap((institution) =>
+    (institution.branches || []).map((branch) => ({
+      'Institution ID': institution.id,
+      Institution: institution.name,
+      'Branch ID': branch.id,
+      Branch: branch.name,
+    })),
+  )
+
+  const instrumentRows = (normalizedMasterData.instrumentTypes || []).map((instrumentType) => ({
+    ID: instrumentType.id,
+    Name: instrumentType.name,
+  }))
+
+  const depositRows = normalizedDeposits.map((deposit) => ({
+    'Investment ID': deposit.id,
+    Holder: deposit.holderName || '',
+    'Bank / Issuer': deposit.bankName || '',
+    'Account / Certificate': deposit.accountNumber || '',
+    Instrument: deposit.instrumentType || '',
+    Status: deposit.status || '',
+    'Investment Date': deposit.investmentDate || '',
+    'Maturity Date': deposit.maturityDate || '',
+    Principal: Number(deposit.principalAmount || 0),
+    'Payout Mode': deposit.payoutMode || '',
+    'Calculation Frequency': deposit.calculationFrequency || '',
+    'Payout Day': deposit.yearlyPayoutMonthDay || '',
+    [BACKUP_DEPOSIT_JSON_COLUMN]: JSON.stringify(deposit),
+  }))
+
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.json_to_sheet(metadataRows, { skipHeader: false }),
+    BACKUP_SHEETS.metadata,
+  )
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.json_to_sheet(ownerRows, { skipHeader: false }),
+    BACKUP_SHEETS.owners,
+  )
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.json_to_sheet(institutionRows, { skipHeader: false }),
+    BACKUP_SHEETS.institutions,
+  )
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.json_to_sheet(branchRows, { skipHeader: false }),
+    BACKUP_SHEETS.branches,
+  )
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.json_to_sheet(instrumentRows, { skipHeader: false }),
+    BACKUP_SHEETS.instrumentTypes,
+  )
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.json_to_sheet(depositRows, { skipHeader: false }),
+    BACKUP_SHEETS.deposits,
+  )
+
+  return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' })
+}
+
+const getBackupSheetRows = (workbook, sheetName) => {
+  const worksheet = workbook.Sheets[sheetName]
+  if (!worksheet) {
+    throw new Error(`Backup file must contain a sheet named "${sheetName}"`)
+  }
+
+  return XLSX.utils.sheet_to_json(worksheet, {
+    defval: '',
+    raw: false,
+  })
+}
+
+const parseDelimitedList = (value) =>
+  String(value || '')
+    .split('|')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+
+const parseBackupWorkbook = (buffer) => {
+  const workbook = XLSX.read(buffer, {
+    type: 'buffer',
+    cellDates: false,
+  })
+
+  const metadataRows = getBackupSheetRows(workbook, BACKUP_SHEETS.metadata)
+  const ownerRows = getBackupSheetRows(workbook, BACKUP_SHEETS.owners)
+  const institutionRows = getBackupSheetRows(workbook, BACKUP_SHEETS.institutions)
+  const branchRows = getBackupSheetRows(workbook, BACKUP_SHEETS.branches)
+  const instrumentRows = getBackupSheetRows(workbook, BACKUP_SHEETS.instrumentTypes)
+  const depositRows = getBackupSheetRows(workbook, BACKUP_SHEETS.deposits)
+
+  const institutionsById = new Map(
+    institutionRows
+      .map((row) => ({
+        id: String(row.ID || '').trim(),
+        name: String(row.Name || '').trim(),
+      }))
+      .filter((row) => row.id && row.name)
+      .map((row) => [row.id, { ...row, branches: [] }]),
+  )
+
+  branchRows.forEach((row) => {
+    const institutionId = String(row['Institution ID'] || '').trim()
+    const institutionName = String(row.Institution || '').trim()
+    const branchId = String(row['Branch ID'] || '').trim()
+    const branchName = String(row.Branch || '').trim()
+
+    const institution =
+      institutionsById.get(institutionId) ||
+      (institutionName
+        ? {
+            id: institutionId || sanitizeBackupFilenamePart(institutionName, 'institution'),
+            name: institutionName,
+            branches: [],
+          }
+        : null)
+
+    if (!institution || !branchName) {
+      return
+    }
+
+    institution.branches.push({
+      id: branchId || sanitizeBackupFilenamePart(branchName, 'branch'),
+      name: branchName,
+    })
+    institutionsById.set(institution.id, institution)
+  })
+
+  const masterData = normalizeMasterData({
+    owners: ownerRows.map((row) => ({
+      id: String(row.ID || '').trim(),
+      name: String(row.Name || '').trim(),
+      ownerType: String(row.Type || '').trim(),
+      taxSlabRate: Number(row['Tax %'] || 0),
+      aliases: parseDelimitedList(row.Aliases),
+    })),
+    institutions: Array.from(institutionsById.values()),
+    instrumentTypes: instrumentRows.map((row) => ({
+      id: String(row.ID || '').trim(),
+      name: String(row.Name || '').trim(),
+    })),
+  })
+
+  const deposits = depositRows.map((row, index) => {
+    const payloadText = String(row[BACKUP_DEPOSIT_JSON_COLUMN] || '').trim()
+    let payload = null
+    let parseError = ''
+
+    if (!payloadText) {
+      parseError = 'Missing full deposit record data.'
+    } else {
+      try {
+        payload = JSON.parse(payloadText)
+      } catch (error) {
+        parseError = `Could not read deposit record data: ${error.message}`
+      }
+    }
+
+    return {
+      rowNumber: index + 2,
+      row,
+      payload,
+      parseError,
+    }
+  })
+
+  return {
+    metadataRows,
+    masterData,
+    deposits,
+  }
+}
+
+const isValidBackupDate = (value) =>
+  /^\d{4}-\d{2}-\d{2}$/.test(String(value || '').trim())
+
+const validateBackupSnapshot = ({ metadataRows, masterData, deposits }) => {
+  const errors = []
+  const rowErrors = []
+  const ownerNames = new Set((masterData.owners || []).map((owner) => normalizeText(owner.name)).filter(Boolean))
+  const institutionNames = new Set(
+    (masterData.institutions || []).map((institution) => normalizeText(institution.name)).filter(Boolean),
+  )
+  const instrumentNames = new Set(
+    (masterData.instrumentTypes || []).map((instrumentType) => normalizeText(instrumentType.name)).filter(Boolean),
+  )
+  const branchLookup = new Map(
+    (masterData.institutions || []).map((institution) => [
+      normalizeText(institution.name),
+      new Set((institution.branches || []).map((branch) => normalizeText(branch.name)).filter(Boolean)),
+    ]),
+  )
+
+  const versionRow = metadataRows.find(
+    (row) => normalizeText(row.Field) === normalizeText('Workbook version'),
+  )
+
+  if (versionRow && String(versionRow.Value || '').trim() !== BACKUP_WORKBOOK_VERSION) {
+    errors.push(`Backup version ${String(versionRow.Value || '').trim()} is not supported.`)
+  }
+
+  const parsedDeposits = []
+  const depositIds = new Set()
+
+  deposits.forEach((entry) => {
+    const payloadErrors = []
+    if (entry.parseError) {
+      payloadErrors.push(entry.parseError)
+    }
+
+    const payload = entry.payload && typeof entry.payload === 'object' ? entry.payload : null
+    const depositId = String(payload?.id || entry.row?.['Investment ID'] || '').trim()
+    const holderName = String(payload?.holderName || entry.row?.Holder || '').trim()
+    const fundingSource = String(payload?.fundingSource || '').trim()
+    const bankName = String(payload?.bankName || entry.row?.['Bank / Issuer'] || '').trim()
+    const branchCity = String(payload?.branchCity || '').trim()
+    const instrumentType = String(payload?.instrumentType || entry.row?.Instrument || '').trim()
+    const investmentDate = String(payload?.investmentDate || entry.row?.['Investment Date'] || '').trim()
+    const maturityDate = String(payload?.maturityDate || entry.row?.['Maturity Date'] || '').trim()
+    const principalAmount = Number(payload?.principalAmount || entry.row?.Principal || 0)
+    const allocations = Array.isArray(payload?.allocations) ? payload.allocations : []
+    const cashSettlements = Array.isArray(payload?.cashSettlements) ? payload.cashSettlements : []
+
+    if (!depositId) {
+      payloadErrors.push('Investment ID is missing.')
+    } else if (depositIds.has(depositId)) {
+      payloadErrors.push(`Investment ID "${depositId}" appears more than once.`)
+    } else {
+      depositIds.add(depositId)
+    }
+
+    if (!holderName) {
+      payloadErrors.push('Holder is missing.')
+    } else if (!ownerNames.has(normalizeText(holderName))) {
+      payloadErrors.push(`Holder "${holderName}" is not present in Owners.`)
+    }
+
+    if (fundingSource && !ownerNames.has(normalizeText(fundingSource))) {
+      payloadErrors.push(`Funding source "${fundingSource}" is not present in Owners.`)
+    }
+
+    if (!bankName) {
+      payloadErrors.push('Bank / issuer is missing.')
+    } else if (!institutionNames.has(normalizeText(bankName))) {
+      payloadErrors.push(`Institution "${bankName}" is not present in Institutions.`)
+    }
+
+    if (branchCity) {
+      const institutionBranches = branchLookup.get(normalizeText(bankName)) || new Set()
+      if (!institutionBranches.has(normalizeText(branchCity))) {
+        payloadErrors.push(`Branch "${branchCity}" is not present under institution "${bankName}".`)
+      }
+    }
+
+    if (!instrumentType) {
+      payloadErrors.push('Instrument type is missing.')
+    } else if (!instrumentNames.has(normalizeText(instrumentType))) {
+      payloadErrors.push(`Instrument type "${instrumentType}" is not present in Instrument types.`)
+    }
+
+    if (!isValidBackupDate(investmentDate)) {
+      payloadErrors.push('Investment date must be in YYYY-MM-DD format.')
+    }
+
+    if (!isValidBackupDate(maturityDate)) {
+      payloadErrors.push('Maturity date must be in YYYY-MM-DD format.')
+    }
+
+    if (!Number.isFinite(principalAmount) || principalAmount <= 0) {
+      payloadErrors.push('Principal must be a positive number.')
+    }
+
+    const invalidAllocations = allocations.some(
+      (allocation) =>
+        !allocation ||
+        !String(allocation.eventId || '').trim() ||
+        !Number.isFinite(Number(allocation.amount || 0)) ||
+        Number(allocation.amount || 0) <= 0,
+    )
+
+    if (invalidAllocations) {
+      payloadErrors.push('Funding links contain an invalid amount or missing source reference.')
+    }
+
+    const invalidCashSettlements = cashSettlements.some(
+      (settlement) =>
+        !settlement ||
+        !String(settlement.eventId || '').trim() ||
+        !Number.isFinite(Number(settlement.amount || 0)) ||
+        Number(settlement.amount || 0) <= 0,
+    )
+
+    if (invalidCashSettlements) {
+      payloadErrors.push('Cash status contains an invalid amount or missing source reference.')
+    }
+
+    parsedDeposits.push({
+      rowNumber: entry.rowNumber,
+      investment: {
+        id: depositId,
+        holderName,
+        bankName,
+        accountNumber: String(payload?.accountNumber || entry.row?.['Account / Certificate'] || '').trim(),
+        instrumentType,
+        principalAmount,
+        status: String(payload?.status || entry.row?.Status || '').trim() || 'Open',
+        investmentDate,
+        maturityDate,
+      },
+      payload: payload
+        ? {
+            ...payload,
+            id: depositId,
+            holderName,
+            fundingSource: fundingSource || holderName,
+            bankName,
+            branchCity,
+            instrumentType,
+            investmentDate,
+            maturityDate,
+            principalAmount,
+          }
+        : null,
+      errors: payloadErrors,
+    })
+
+    if (payloadErrors.length > 0) {
+      rowErrors.push({
+        rowNumber: entry.rowNumber,
+        messages: payloadErrors,
+      })
+    }
+  })
+
+  const knownDepositIds = new Set(parsedDeposits.map((deposit) => deposit.investment.id).filter(Boolean))
+
+  parsedDeposits.forEach((deposit) => {
+    if (!deposit.payload) {
+      return
+    }
+
+    const referenceErrors = []
+    ;[...(deposit.payload.allocations || []), ...(deposit.payload.cashSettlements || [])].forEach((entry) => {
+      const eventId = String(entry?.eventId || '').trim()
+      if (!eventId) {
+        return
+      }
+
+      if (eventId.startsWith('maturity:')) {
+        const sourceDepositId = eventId.slice('maturity:'.length)
+        if (!knownDepositIds.has(sourceDepositId)) {
+          referenceErrors.push(`Funding reference "${eventId}" points to a deposit that is not in this backup.`)
+        }
+        return
+      }
+
+      if (eventId.startsWith('interest:')) {
+        const sourceDepositId = eventId.split(':')[1] || ''
+        if (!knownDepositIds.has(sourceDepositId)) {
+          referenceErrors.push(`Funding reference "${eventId}" points to a deposit that is not in this backup.`)
+        }
+      }
+    })
+
+    if (referenceErrors.length > 0) {
+      const existing = rowErrors.find((entry) => entry.rowNumber === deposit.rowNumber)
+      if (existing) {
+        existing.messages.push(...referenceErrors)
+      } else {
+        rowErrors.push({
+          rowNumber: deposit.rowNumber,
+          messages: referenceErrors,
+        })
+      }
+      deposit.errors.push(...referenceErrors)
+    }
+  })
+
+  return {
+    hasErrors: errors.length > 0 || rowErrors.length > 0,
+    errors,
+    rowErrors,
+    parsedRowCount: deposits.length,
+    validRowCount: parsedDeposits.filter((entry) => entry.errors.length === 0).length,
+    previewRows: parsedDeposits.slice(0, 8).map((entry) => ({
+      rowNumber: entry.rowNumber,
+      investment: entry.investment,
+      errors: entry.errors,
+    })),
+    summary: {
+      investmentCount: parsedDeposits.length,
+      ownerCount: (masterData.owners || []).length,
+      institutionCount: (masterData.institutions || []).length,
+      instrumentTypeCount: (masterData.instrumentTypes || []).length,
+      branchCount: (masterData.institutions || []).reduce(
+        (sum, institution) => sum + (institution.branches || []).length,
+        0,
+      ),
+      archivedInvestmentCount: parsedDeposits.filter(
+        (entry) => String(entry.payload?.status || '').trim().toLowerCase() === 'closed' || entry.payload?.isDeleted,
+      ).length,
+    },
+    snapshot: {
+      masterData,
+      deposits: parsedDeposits.filter((entry) => entry.errors.length === 0).map((entry) => entry.payload),
+    },
+  }
 }
 
 const buildMasterRenameMap = (previousItems = [], nextItems = []) =>
@@ -2292,6 +2808,181 @@ app.get(
     const deposits = await Deposit.find({ ownerUserId: request.portfolioContext.ownerUserId }).lean()
     response.json({
       deposits: deposits.map(normalizeDepositDoc),
+    })
+  },
+)
+
+app.get(
+  '/api/data-backup/export',
+  requireAuth,
+  resolvePortfolioContext,
+  requirePortfolioWriteAccess,
+  async (request, response) => {
+    const [deposits, masterData] = await Promise.all([
+      Deposit.find({ ownerUserId: request.portfolioContext.ownerUserId }).lean(),
+      getMasterData(request.portfolioContext.ownerUserId, { createIfMissing: true }),
+    ])
+
+    const workbookBuffer = buildBackupWorkbookBuffer({
+      portfolioLabel: request.portfolioContext.ownerDisplayName || 'portfolio',
+      ownerUserId: request.portfolioContext.ownerUserId,
+      deposits,
+      masterData,
+    })
+
+    response.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${buildBackupFilename(request.portfolioContext.ownerDisplayName || 'portfolio')}"`,
+    )
+    response.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    response.send(workbookBuffer)
+  },
+)
+
+app.post(
+  '/api/data-backup/preview',
+  requireAuth,
+  resolvePortfolioContext,
+  requirePortfolioWriteAccess,
+  importUpload.single('file'),
+  async (request, response) => {
+    if (!request.file) {
+      response.status(400).json({ message: 'Choose a backup file first.' })
+      return
+    }
+
+    if (!request.file.originalname?.toLowerCase().endsWith('.xlsx')) {
+      response.status(400).json({ message: 'Only .xlsx backup files are supported.' })
+      return
+    }
+
+    try {
+      const parsed = parseBackupWorkbook(request.file.buffer)
+      const validation = validateBackupSnapshot(parsed)
+      response.json({
+        fileName: request.file.originalname,
+        ...validation,
+      })
+    } catch (error) {
+      response.status(400).json({
+        message: error.message,
+      })
+    }
+  },
+)
+
+app.post(
+  '/api/data-backup/restore',
+  requireAuth,
+  resolvePortfolioContext,
+  requirePortfolioWriteAccess,
+  importUpload.single('file'),
+  async (request, response) => {
+    if (!request.file) {
+      response.status(400).json({ message: 'Choose a backup file first.' })
+      return
+    }
+
+    if (!request.file.originalname?.toLowerCase().endsWith('.xlsx')) {
+      response.status(400).json({ message: 'Only .xlsx backup files are supported.' })
+      return
+    }
+
+    let validation
+    try {
+      validation = validateBackupSnapshot(parseBackupWorkbook(request.file.buffer))
+    } catch (error) {
+      response.status(400).json({
+        message: error.message,
+      })
+      return
+    }
+
+    if (validation.hasErrors) {
+      response.status(400).json({
+        message: 'Backup file has validation issues. Review the preview before restoring.',
+        ...validation,
+      })
+      return
+    }
+
+    const currentState = await Promise.all([
+      Deposit.find({ ownerUserId: request.portfolioContext.ownerUserId }).lean(),
+      getMasterData(request.portfolioContext.ownerUserId, { createIfMissing: true }),
+    ])
+
+    const previousDeposits = currentState[0].map(normalizeDepositDoc)
+    const previousMasterData = normalizeMasterData(currentState[1])
+    const session = await mongoose.startSession()
+
+    try {
+      await session.startTransaction()
+
+      await Deposit.deleteMany({ ownerUserId: request.portfolioContext.ownerUserId }, { session })
+
+      const restoredDeposits = validation.snapshot.deposits.map((deposit) => {
+        const snapshot = { ...deposit }
+        delete snapshot._id
+        delete snapshot.ownerUserId
+
+        return {
+          ...snapshot,
+          ownerUserId: request.portfolioContext.ownerUserId,
+          createdByUserId: String(snapshot.createdByUserId || request.sessionUser.id),
+          updatedByUserId: String(snapshot.updatedByUserId || request.sessionUser.id),
+        }
+      })
+
+      if (restoredDeposits.length > 0) {
+        await Deposit.collection.insertMany(restoredDeposits, { session })
+      }
+
+      await MasterData.findOneAndUpdate(
+        { ownerUserId: request.portfolioContext.ownerUserId },
+        {
+          ownerUserId: request.portfolioContext.ownerUserId,
+          ...validation.snapshot.masterData,
+        },
+        {
+          session,
+          new: true,
+          upsert: true,
+          setDefaultsOnInsert: true,
+        },
+      )
+
+      await writeAdminAuditLog({
+        actor: request.sessionUser,
+        action: 'admin.backup.restore',
+        targetType: 'portfolioBackup',
+        targetRecordId: request.portfolioContext.ownerUserId,
+        targetOwnerUserId: request.portfolioContext.ownerUserId,
+        before: {
+          depositCount: previousDeposits.length,
+          masterData: previousMasterData,
+        },
+        after: {
+          depositCount: restoredDeposits.length,
+          masterData: validation.snapshot.masterData,
+        },
+        metadata: {
+          fileName: request.file.originalname,
+          summary: validation.summary,
+        },
+        session,
+      })
+
+      await session.commitTransaction()
+    } finally {
+      await session.endSession()
+    }
+
+    response.json({
+      message: 'Backup restored successfully.',
+      summary: validation.summary,
     })
   },
 )

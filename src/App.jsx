@@ -5,6 +5,7 @@ import AuthView from './features/auth/AuthView.jsx'
 import DepositsView from './features/deposits/DepositsView.jsx'
 import DepositEditorView from './features/editor/DepositEditorView.jsx'
 import MastersView from './features/masters/MastersView.jsx'
+import BackupRestorePanel from './features/settings/BackupRestorePanel.jsx'
 import PortfolioAccessPanel from './features/sharing/PortfolioAccessPanel.jsx'
 import FyTaxView from './features/tax/FyTaxView.jsx'
 import { downloadInvestmentsWorkbook } from './features/admin/exportWorkbook.js'
@@ -14,12 +15,110 @@ import { buildOwnerAliasLookup, emptyMasterData, normalizeMasterData } from '../
 const ADD_NEW_MASTER_VALUE = '__add_new_master__'
 const THEME_STORAGE_KEY = 'yieldflow.theme'
 const AUTHOR_LINKEDIN_URL = 'https://www.linkedin.com/in/parthdave2'
+const APP_HOME_URL = 'https://getyieldflow.netlify.app'
 const createEmptySessionState = () => ({
   authenticated: false,
   user: null,
   accessiblePortfolios: [],
   activePortfolioOwnerId: '',
 })
+
+function PrivacyPolicyView({ themeClass }) {
+  return (
+    <div className={`shell ${themeClass}`}>
+      <section className="privacy-shell">
+        <article className="panel privacy-card">
+          <div className="privacy-head">
+            <p className="eyebrow">YieldFlow</p>
+            <h1>Privacy Policy</h1>
+            <p className="privacy-updated">Last updated: 03 May 2026</p>
+          </div>
+
+          <div className="privacy-body">
+            <section className="privacy-section">
+              <h2>What YieldFlow does</h2>
+              <p>
+                YieldFlow is a financial lifecycle management tool used to track deposits,
+                interest receipts, maturity cash, reinvestment decisions, and backup snapshots for
+                personal portfolios.
+              </p>
+            </section>
+
+            <section className="privacy-section">
+              <h2>Information used by the application</h2>
+              <p>YieldFlow may store the information you enter for managing your portfolio, including:</p>
+              <ul className="privacy-list">
+                <li>deposit and investment records</li>
+                <li>owners, institutions, branches, and instrument types</li>
+                <li>cashflow allocations, maturity usage, and notes</li>
+                <li>backup files you explicitly download or restore</li>
+              </ul>
+            </section>
+
+            <section className="privacy-section">
+              <h2>Google sign-in</h2>
+              <p>
+                When you sign in with Google, YieldFlow uses your Google identity for
+                authentication. This may include your name, email address, and profile picture so
+                the application can recognize your account and portfolio access.
+              </p>
+            </section>
+
+            <section className="privacy-section">
+              <h2>Google Drive backup access</h2>
+              <p>
+                If you choose the Google Drive backup option, YieldFlow requests permission only
+                to create or update backup files that the application manages in your Google Drive.
+                Google Drive access is used only when you explicitly select the Drive backup
+                feature.
+              </p>
+            </section>
+
+            <section className="privacy-section">
+              <h2>How data is used</h2>
+              <p>YieldFlow uses your data only to provide portfolio management capabilities such as:</p>
+              <ul className="privacy-list">
+                <li>cashflow visibility and interest tracking</li>
+                <li>maturity and reinvestment planning</li>
+                <li>backup and restore operations</li>
+              </ul>
+            </section>
+
+            <section className="privacy-section">
+              <h2>Data sharing</h2>
+              <p>
+                YieldFlow does not use your Google Drive access unless you explicitly request a
+                backup save to Drive. The application does not use portfolio data for advertising.
+              </p>
+            </section>
+
+            <section className="privacy-section">
+              <h2>Contact</h2>
+              <p>
+                For questions about this policy or data usage, contact Parth Dave at{' '}
+                <a href="mailto:parthdave.1984@gmail.com">parthdave.1984@gmail.com</a>.
+              </p>
+            </section>
+          </div>
+
+          <div className="privacy-footer">
+            <a className="secondary-btn compact" href={APP_HOME_URL}>
+              Back to YieldFlow
+            </a>
+            <a
+              className="secondary-btn compact ghost-btn"
+              href={AUTHOR_LINKEDIN_URL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              View LinkedIn
+            </a>
+          </div>
+        </article>
+      </section>
+    </div>
+  )
+}
 
 const normalizeSessionState = (sessionResponse = {}) => ({
   authenticated: Boolean(sessionResponse.authenticated),
@@ -141,6 +240,7 @@ const canonicalizeDepositsAgainstMasterData = (depositList, currentMasterData) =
 }
 
 function App() {
+  const currentPathname = globalThis.location?.pathname || '/'
   const [sessionState, setSessionState] = useState(createEmptySessionState)
   const [isAuthenticating, setIsAuthenticating] = useState(false)
   const [authError, setAuthError] = useState('')
@@ -2132,6 +2232,10 @@ function App() {
     setPortfolioReloadSeed((current) => current + 1)
   }
 
+  const handleBackupRestoreSuccess = async () => {
+    setPortfolioReloadSeed((current) => current + 1)
+  }
+
   const desktopTabs = [
     ['dashboard', 'Dashboard'],
     ['deposits', 'Deposits'],
@@ -2141,6 +2245,10 @@ function App() {
     ['dashboard', 'Dashboard'],
     ['deposits', 'Deposits'],
   ]
+
+  if (currentPathname === '/privacy') {
+    return <PrivacyPolicyView themeClass={themeClass} />
+  }
 
   if (!sessionState.authenticated) {
     return (
@@ -2362,6 +2470,15 @@ function App() {
                 <p>Reference data and admin utilities.</p>
               </div>
             </div>
+
+            {canEditPortfolio && (
+              <BackupRestorePanel
+                ownerUserId={activePortfolioOwnerId}
+                portfolioLabel={activePortfolioLabel}
+                isReadOnly={isReadOnlyPortfolio}
+                onRestoreSuccess={handleBackupRestoreSuccess}
+              />
+            )}
 
             <div className="settings-actions">
               {canUseAdmin && (

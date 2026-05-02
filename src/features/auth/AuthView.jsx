@@ -1,38 +1,6 @@
 import { useEffect, useRef } from 'react'
-
-const GOOGLE_SCRIPT_SRC = 'https://accounts.google.com/gsi/client'
-
-let googleScriptPromise = null
+import { loadGoogleIdentityScript } from './googleIdentity.js'
 let initializedGoogleClientId = ''
-
-const loadGoogleScript = () => {
-  if (globalThis.google?.accounts?.id) {
-    return Promise.resolve()
-  }
-
-  if (!googleScriptPromise) {
-    googleScriptPromise = new Promise((resolve, reject) => {
-      const existing = document.querySelector(`script[src="${GOOGLE_SCRIPT_SRC}"]`)
-      if (existing) {
-        existing.addEventListener('load', () => resolve(), { once: true })
-        existing.addEventListener('error', () => reject(new Error('Failed to load Google Sign-In')), {
-          once: true,
-        })
-        return
-      }
-
-      const script = document.createElement('script')
-      script.src = GOOGLE_SCRIPT_SRC
-      script.async = true
-      script.defer = true
-      script.onload = () => resolve()
-      script.onerror = () => reject(new Error('Failed to load Google Sign-In'))
-      document.head.append(script)
-    })
-  }
-
-  return googleScriptPromise
-}
 
 export default function AuthView({ onAuthenticate, error, isAuthenticating, themeClass }) {
   const buttonRef = useRef(null)
@@ -45,7 +13,7 @@ export default function AuthView({ onAuthenticate, error, isAuthenticating, them
       return undefined
     }
 
-    loadGoogleScript()
+    loadGoogleIdentityScript()
       .then(() => {
         if (!isMounted || !globalThis.google?.accounts?.id || !buttonRef.current) {
           return
