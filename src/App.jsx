@@ -3280,6 +3280,10 @@ function App() {
         <a href={AUTHOR_LINKEDIN_URL} target="_blank" rel="noreferrer">
           LinkedIn
         </a>
+        <span aria-hidden="true">•</span>
+        <a href={`${APP_HOME_URL}/privacy`}>Privacy</a>
+        <span aria-hidden="true">•</span>
+        <a href={`${APP_HOME_URL}/terms`}>Terms</a>
       </footer>
 
       {isAboutOpen && (

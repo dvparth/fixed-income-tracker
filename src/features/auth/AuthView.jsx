@@ -5,6 +5,7 @@ let initializedGoogleClientId = ''
 export default function AuthView({ onAuthenticate, error, isAuthenticating, themeClass }) {
   const buttonRef = useRef(null)
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
+  const appHomeUrl = 'https://getyieldflow.netlify.app'
 
   useEffect(() => {
     let isMounted = true
@@ -75,6 +76,12 @@ export default function AuthView({ onAuthenticate, error, isAuthenticating, them
           )}
 
           {error && <div className="status-banner error">{error}</div>}
+
+          <div className="auth-legal-links">
+            <a href={`${appHomeUrl}/privacy`}>Privacy</a>
+            <span aria-hidden="true">•</span>
+            <a href={`${appHomeUrl}/terms`}>Terms</a>
+          </div>
         </article>
       </section>
     </div>
