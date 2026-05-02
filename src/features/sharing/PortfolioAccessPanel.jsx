@@ -9,19 +9,22 @@ export default function PortfolioAccessPanel({
   sharedWithMe,
   isSubmittingShare,
   shareFeedback,
+  showHeader = true,
 }) {
   return (
     <section className="settings-section settings-section-accent">
-      <div className="section-head">
-        <div>
-          <h2>{isOwnerPortfolio ? 'Access' : 'Shared access'}</h2>
-          <p>
-            {isOwnerPortfolio
-              ? `Control who can view ${activePortfolioLabel} and what they are allowed to do.`
-              : `You are viewing ${activePortfolioLabel} with limited access.`}
-          </p>
+      {showHeader ? (
+        <div className="section-head">
+          <div>
+            <h2>{isOwnerPortfolio ? 'Portfolio sharing' : 'Shared portfolio access'}</h2>
+            <p>
+              {isOwnerPortfolio
+                ? `Control who can view ${activePortfolioLabel} and what they are allowed to do.`
+                : `You are viewing ${activePortfolioLabel} with limited access.`}
+            </p>
+          </div>
         </div>
-      </div>
+      ) : null}
 
       {shareFeedback && (
         <div className={shareFeedback.type === 'error' ? 'status-banner error' : 'status-banner'}>

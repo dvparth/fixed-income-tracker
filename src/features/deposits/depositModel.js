@@ -1,4 +1,5 @@
 export const TODAY = new Date()
+export const APP_ACTIVITY_EVENT = 'yieldflow:app-activity'
 export const FY_QUARTER_MONTH_DAYS = [
   [2, 31],
   [5, 30],
@@ -510,6 +511,15 @@ export const requestJson = async (url, options = {}) => {
   })
 
   const data = await response.json().catch(() => null)
+  globalThis.dispatchEvent?.(
+    new CustomEvent(APP_ACTIVITY_EVENT, {
+      detail: {
+        url: requestUrl,
+        method: String(options.method || 'GET').toUpperCase(),
+        ok: response.ok,
+      },
+    }),
+  )
 
   if (!response.ok) {
     throw new Error(data?.message || `Request failed with status ${response.status}`)

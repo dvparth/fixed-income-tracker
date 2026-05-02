@@ -39,6 +39,15 @@ const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file'
 const GOOGLE_DRIVE_APP_FOLDER_NAME = 'YieldFlow Backups'
 
 const escapeDriveQueryValue = (value) => String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+const sanitizeFilenamePart = (value) =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'portfolio'
+
+const buildStableDriveBackupFilename = ({ ownerUserId, portfolioLabel }) =>
+  `yieldflow-backup-${sanitizeFilenamePart(portfolioLabel)}-${String(ownerUserId || 'portfolio').trim().toLowerCase()}.xlsx`
 
 const triggerDownload = (blob, filename) => {
   const url = URL.createObjectURL(blob)
@@ -54,6 +63,7 @@ const triggerDownload = (blob, filename) => {
 export default function BackupRestorePanel({
   ownerUserId,
   portfolioLabel,
+  loginEmail = '',
   isReadOnly = false,
   onRestoreSuccess,
 }) {
@@ -66,6 +76,7 @@ export default function BackupRestorePanel({
   const [isPreviewing, setIsPreviewing] = useState(false)
   const [isRestoring, setIsRestoring] = useState(false)
   const [confirmReplace, setConfirmReplace] = useState(false)
+  const [isRestoreConfirmOpen, setIsRestoreConfirmOpen] = useState(false)
   const [backupDestination, setBackupDestination] = useState('local')
   const [driveLink, setDriveLink] = useState('')
 
@@ -73,8 +84,12 @@ export default function BackupRestorePanel({
   const previewSummary = previewResult?.summary || null
   const previewRows = useMemo(() => previewResult?.previewRows || [], [previewResult])
   const canUseDrive = Boolean(googleClientId)
+  const isDriveDestination = backupDestination === 'drive'
+  const backupDescription = isDriveDestination
+    ? `Create a full snapshot of ${portfolioLabel} and keep one managed backup file in Google Drive. Google Drive can keep version history as that file is updated over time.`
+    : `Create a full snapshot of ${portfolioLabel} and download it to this device as an Excel backup file.`
 
-  const downloadBackupFile = async (prefix = 'yieldflow-backup') => {
+  const fetchBackupFile = async (fallbackFilename = 'yieldflow-backup.xlsx') => {
     const response = await fetch(getApiUrl(buildOwnerScopedPath('/api/data-backup/export', ownerUserId)), {
       credentials: 'include',
     })
@@ -87,9 +102,8 @@ export default function BackupRestorePanel({
     const blob = await response.blob()
     const filename = parseDownloadFilename(
       response.headers.get('content-disposition'),
-      `${prefix}.xlsx`,
+      fallbackFilename,
     )
-    triggerDownload(blob, filename)
     return { blob, filename }
   }
 
@@ -185,7 +199,8 @@ export default function BackupRestorePanel({
     const accessToken = await requestGoogleAccessToken({
       clientId: googleClientId,
       scope: GOOGLE_DRIVE_SCOPE,
-      prompt: 'consent',
+      prompt: '',
+      loginHint: loginEmail,
     })
 
     const folder = await findOrCreateDriveFolder({ accessToken })
@@ -236,9 +251,11 @@ export default function BackupRestorePanel({
       setIsDownloading(true)
       setFeedback(null)
       setDriveLink('')
-      const backupFile = await downloadBackupFile('yieldflow-backup')
 
       if (backupDestination === 'drive') {
+        const backupFile = await fetchBackupFile(
+          buildStableDriveBackupFilename({ ownerUserId, portfolioLabel }),
+        )
         const driveFile = await saveBackupToGoogleDrive(backupFile)
         setDriveLink(String(driveFile?.webViewLink || '').trim())
         setFeedback({
@@ -249,6 +266,8 @@ export default function BackupRestorePanel({
               : 'Backup saved to Google Drive in the YieldFlow Backups folder.',
         })
       } else {
+        const backupFile = await fetchBackupFile()
+        triggerDownload(backupFile.blob, backupFile.filename)
         setFeedback({
           type: 'success',
           message: 'Backup downloaded successfully.',
@@ -293,8 +312,8 @@ export default function BackupRestorePanel({
       setFeedback({
         type: result.hasErrors ? 'error' : 'success',
         message: result.hasErrors
-          ? 'Restore preview found issues. Fix the file before continuing.'
-          : 'Backup file is ready to restore.',
+          ? 'This backup needs fixes before it can be restored.'
+          : 'Backup ready for review.',
       })
     } catch (error) {
       setFeedback({
@@ -310,7 +329,8 @@ export default function BackupRestorePanel({
     try {
       setIsRestoring(true)
       setFeedback(null)
-      await downloadBackupFile('yieldflow-pre-restore-backup')
+      const preRestoreBackupFile = await fetchBackupFile('yieldflow-pre-restore-backup.xlsx')
+      triggerDownload(preRestoreBackupFile.blob, preRestoreBackupFile.filename)
       const result = await uploadFile('/api/data-backup/restore')
       setFeedback({
         type: 'success',
@@ -319,6 +339,7 @@ export default function BackupRestorePanel({
       setPreviewResult(null)
       setSelectedFile(null)
       setConfirmReplace(false)
+      setIsRestoreConfirmOpen(false)
       if (fileInputRef.current) {
         fileInputRef.current.value = ''
       }
@@ -338,7 +359,7 @@ export default function BackupRestorePanel({
       <div className="backup-actions-row">
         <div className="backup-action-copy">
           <strong>Backup</strong>
-          <p>Save a full Excel snapshot of {portfolioLabel} to this device or keep one managed copy in Google Drive.</p>
+          <p>{backupDescription}</p>
         </div>
         <div className="backup-destination-shell">
           <label className="field">
@@ -357,13 +378,18 @@ export default function BackupRestorePanel({
               </option>
             </select>
           </label>
-          {backupDestination === 'drive' && (
+          {isDriveDestination ? (
             <div className="backup-drive-note">
               <strong>YieldFlow Backups</strong>
               <small>
                 The app will create this folder in Google Drive if it does not exist, then keep
-                one backup file per portfolio updated there so Drive can maintain version history.
+                one managed backup file per portfolio updated there.
               </small>
+            </div>
+          ) : (
+            <div className="backup-drive-note">
+              <strong>Device download</strong>
+              <small>Your backup will be downloaded to this device as an Excel file.</small>
             </div>
           )}
           <button
@@ -373,11 +399,11 @@ export default function BackupRestorePanel({
             disabled={isDownloading || isReadOnly}
           >
             {isDownloading
-              ? backupDestination === 'drive'
+              ? isDriveDestination
                 ? 'Saving backup...'
                 : 'Preparing backup...'
-              : backupDestination === 'drive'
-                ? 'Save to Google Drive'
+              : isDriveDestination
+                ? 'Save Backup Now'
                 : 'Download Backup'}
           </button>
         </div>
@@ -386,7 +412,7 @@ export default function BackupRestorePanel({
       <div className="backup-restore-shell">
         <div className="backup-action-copy">
           <strong>Restore from Backup</strong>
-          <p>Upload a backup file, review what will be restored, then confirm replacement.</p>
+          <p>Choose a backup file, review what it contains, then confirm before replacing your current data.</p>
         </div>
 
         <div className="backup-restore-actions">
@@ -411,8 +437,12 @@ export default function BackupRestorePanel({
             onClick={handlePreview}
             disabled={!selectedFile || isPreviewing || isReadOnly}
           >
-            {isPreviewing ? 'Checking backup...' : 'Preview restore'}
+            {isPreviewing ? 'Reviewing backup...' : 'Review Backup'}
           </button>
+        </div>
+
+        <div className="backup-restore-note">
+          Restoring will overwrite your current data.
         </div>
 
         {feedback && (
@@ -435,16 +465,16 @@ export default function BackupRestorePanel({
               <div className="editor-summary-card">
                 <span>Investments</span>
                 <strong>{previewSummary?.investmentCount || 0}</strong>
-                <small>Records that will replace the current portfolio data.</small>
+                <small>Investments included in this backup.</small>
               </div>
               <div className="editor-summary-card">
                 <span>Reference data</span>
                 <strong>{(previewSummary?.ownerCount || 0) + (previewSummary?.institutionCount || 0) + (previewSummary?.instrumentTypeCount || 0)}</strong>
-                <small>Owners, institutions, and instrument types in this backup.</small>
+                <small>Owners, institutions, branches, and instrument types included.</small>
               </div>
               <div className="editor-summary-card">
-                <span>Validation</span>
-                <strong>{previewResult.hasErrors ? 'Needs fixes' : 'Ready'}</strong>
+                <span>Review</span>
+                <strong>{previewResult.hasErrors ? 'Needs attention' : 'Ready'}</strong>
                 <small>
                   {previewResult.hasErrors
                     ? `${previewResult.rowErrors.length + previewResult.errors.length} issue(s) need attention`
@@ -463,7 +493,7 @@ export default function BackupRestorePanel({
 
             {previewResult.errors.length > 0 && (
               <div className="import-error-list">
-                <h4>Backup issues</h4>
+                <h4>Issues in this backup</h4>
                 {previewResult.errors.map((message, index) => (
                   <div key={`${message}-${index}`} className="inline-action-card">
                     <div>
@@ -477,7 +507,7 @@ export default function BackupRestorePanel({
 
             {previewResult.rowErrors.length > 0 && (
               <div className="import-error-list">
-                <h4>Items to fix before restore</h4>
+                <h4>Fix these items before restore</h4>
                 {previewResult.rowErrors.map((entry, index) => (
                   <div key={`${entry.rowNumber || 'row'}-${index}`} className="inline-action-card">
                     <div>
@@ -537,16 +567,70 @@ export default function BackupRestorePanel({
                 <button
                   type="button"
                   className="primary-btn compact-btn"
-                  onClick={handleRestore}
+                  onClick={() => setIsRestoreConfirmOpen(true)}
                   disabled={!canRestore || isRestoring}
                 >
-                  {isRestoring ? 'Restoring...' : 'Restore backup'}
+                  Continue to restore
                 </button>
               </div>
             </div>
           </div>
         )}
       </div>
+
+      {isRestoreConfirmOpen ? (
+        <div
+          className="about-modal-backdrop"
+          role="presentation"
+          onClick={() => {
+            if (!isRestoring) {
+              setIsRestoreConfirmOpen(false)
+            }
+          }}
+        >
+          <section
+            className="about-modal panel backup-confirm-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="restore-confirm-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="section-head">
+              <div>
+                <h2 id="restore-confirm-title">Restore Data</h2>
+                <p>This will replace all your existing data with the selected backup.</p>
+              </div>
+            </div>
+            <div className="backup-confirm-modal-copy">
+              <div className="backup-warning-card">
+                <strong>Your current data will be protected first.</strong>
+                <p>
+                  Before restore starts, YieldFlow will download a backup of your current data to
+                  this device.
+                </p>
+              </div>
+            </div>
+            <div className="backup-confirm-modal-actions">
+              <button
+                type="button"
+                className="secondary-btn compact ghost-btn"
+                onClick={() => setIsRestoreConfirmOpen(false)}
+                disabled={isRestoring}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary-btn compact-btn"
+                onClick={handleRestore}
+                disabled={isRestoring}
+              >
+                {isRestoring ? 'Restoring...' : 'Restore Data'}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   )
 }

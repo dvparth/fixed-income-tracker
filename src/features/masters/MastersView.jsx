@@ -181,6 +181,7 @@ export default function MastersView({
   mastersFeedback,
   initialIntent,
   saveMasterData,
+  onClose,
   returnToEditor,
   showReturnToEditor,
   isReadOnly = false,
@@ -438,11 +439,18 @@ export default function MastersView({
             <h2>Masters</h2>
             <p>Reference data used across owners, institutions, and deposit setup.</p>
           </div>
-          {showReturnToEditor && (
-            <button type="button" className="secondary-btn compact" onClick={returnToEditor}>
-              Back to deposit
-            </button>
-          )}
+          <div className="settings-actions">
+            {showReturnToEditor && (
+              <button type="button" className="secondary-btn compact" onClick={returnToEditor}>
+                Back to deposit
+              </button>
+            )}
+            {onClose ? (
+              <button type="button" className="secondary-btn compact ghost-btn" onClick={onClose}>
+                Close
+              </button>
+            ) : null}
+          </div>
         </div>
 
         {mastersFeedback && (

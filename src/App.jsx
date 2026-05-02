@@ -1,4 +1,4 @@
-import { startTransition, useDeferredValue, useEffect, useMemo, useState } from 'react'
+import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import AdminView from './features/admin/AdminView.jsx'
 import AuthView from './features/auth/AuthView.jsx'
@@ -9,13 +9,16 @@ import BackupRestorePanel from './features/settings/BackupRestorePanel.jsx'
 import PortfolioAccessPanel from './features/sharing/PortfolioAccessPanel.jsx'
 import FyTaxView from './features/tax/FyTaxView.jsx'
 import { downloadInvestmentsWorkbook } from './features/admin/exportWorkbook.js'
-import { TODAY, addDays, computeTdsAmount, computeTdsPercent, deriveTenureParts, emptyForm, formatAllocationsText, formatCurrency, formatDate, formatTenure, generateInterestEvents, getCashSettlements, getCurrentFinancialYearRange, getDateSortValue, getEffectivePayoutMode, getFinancialYearLabelFromDate, getFinancialYearRangeFromLabel, getFundingAllocations, getHolderSearchTokens, getMaturitySourceEventId, getPayoutModeLabel, getPostTdsAmount, hydrateDeposit, needsPeriodicPayoutSetup, normalizeDeposit, parseAllocationEntries, requestJson, toYmd } from './features/deposits/depositModel.js'
+import { APP_ACTIVITY_EVENT, TODAY, addDays, computeTdsAmount, computeTdsPercent, deriveTenureParts, emptyForm, formatAllocationsText, formatCurrency, formatDate, formatTenure, generateInterestEvents, getCashSettlements, getCurrentFinancialYearRange, getDateSortValue, getEffectivePayoutMode, getFinancialYearLabelFromDate, getFinancialYearRangeFromLabel, getFundingAllocations, getHolderSearchTokens, getMaturitySourceEventId, getPayoutModeLabel, getPostTdsAmount, hydrateDeposit, needsPeriodicPayoutSetup, normalizeDeposit, parseAllocationEntries, requestJson, toYmd } from './features/deposits/depositModel.js'
 import { buildOwnerAliasLookup, emptyMasterData, normalizeMasterData } from '../shared/masterData.js'
 
 const ADD_NEW_MASTER_VALUE = '__add_new_master__'
 const THEME_STORAGE_KEY = 'yieldflow.theme'
 const AUTHOR_LINKEDIN_URL = 'https://www.linkedin.com/in/parthdave2'
 const APP_HOME_URL = 'https://getyieldflow.netlify.app'
+const SESSION_WARNING_MS = 55 * 60 * 1000
+const SESSION_TIMEOUT_MS = 60 * 60 * 1000
+const SESSION_ACTIVITY_THROTTLE_MS = 15000
 const createEmptySessionState = () => ({
   authenticated: false,
   user: null,
@@ -343,8 +346,12 @@ function App() {
   const [themeClass, setThemeClass] = useState(
     () => globalThis.localStorage?.getItem(THEME_STORAGE_KEY) || 'theme-midnight-navy',
   )
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [expandedSettingsSection, setExpandedSettingsSection] = useState('account')
   const [isAboutOpen, setIsAboutOpen] = useState(false)
+  const [lastActivityAt, setLastActivityAt] = useState(() => Date.now())
+  const [isSessionWarningOpen, setIsSessionWarningOpen] = useState(false)
   const [activePortfolioOwnerId, setActivePortfolioOwnerId] = useState('')
   const [sharesState, setSharesState] = useState({ ownerShares: [], sharedWithMe: [] })
   const [shareEmail, setShareEmail] = useState('')
@@ -403,6 +410,8 @@ function App() {
   const [isLoadingTaxSummary, setIsLoadingTaxSummary] = useState(false)
   const [taxSummaryError, setTaxSummaryError] = useState('')
   const [selectedDashboardOwner, setSelectedDashboardOwner] = useState('')
+  const userMenuRef = useRef(null)
+  const lastActivityRef = useRef(lastActivityAt)
   const activeDeposits = useMemo(
     () => deposits.filter((deposit) => !deposit.isDeleted),
     [deposits],
@@ -419,6 +428,52 @@ function App() {
     () => (editingId ? deposits.find((deposit) => deposit.id === editingId) ?? null : null),
     [deposits, editingId],
   )
+  const recordSessionActivity = (force = false) => {
+    const now = Date.now()
+    if (!force && now - lastActivityRef.current < SESSION_ACTIVITY_THROTTLE_MS) {
+      return
+    }
+
+    lastActivityRef.current = now
+    setLastActivityAt(now)
+    setIsSessionWarningOpen(false)
+  }
+
+  const openSettingsPanel = (section = 'account') => {
+    setExpandedSettingsSection(section)
+    setIsSettingsOpen(true)
+    setIsUserMenuOpen(false)
+  }
+
+  const toggleSettingsSection = (section) => {
+    setExpandedSettingsSection((current) => (current === section ? '' : section))
+  }
+
+  const performLogout = async (silent = false) => {
+    try {
+      await requestJson('/api/auth/logout', { method: 'POST' })
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setSessionState(createEmptySessionState())
+      setActivePortfolioOwnerId('')
+      setDeposits([])
+      setMasterData(emptyMasterData)
+      setSelectedId(null)
+      setSharesState({ ownerShares: [], sharedWithMe: [] })
+      setShareEmail('')
+      setShareFeedback(null)
+      setAuthError('')
+      setActiveTab('dashboard')
+      setIsUserMenuOpen(false)
+      setIsSettingsOpen(false)
+      setIsSessionWarningOpen(false)
+      if (!silent) {
+        lastActivityRef.current = Date.now()
+        setLastActivityAt(lastActivityRef.current)
+      }
+    }
+  }
 
   useEffect(() => {
     const loadSession = async () => {
@@ -433,11 +488,13 @@ function App() {
           setDeposits([])
           setMasterData(emptyMasterData)
           setSelectedId(null)
+          setIsSessionWarningOpen(false)
           return
         }
 
         setSessionState(sessionResponse)
         setActivePortfolioOwnerId(sessionResponse.activePortfolioOwnerId)
+        recordSessionActivity(true)
       } catch (error) {
         setLoadError(error.message)
       } finally {
@@ -465,6 +522,43 @@ function App() {
   useEffect(() => {
     globalThis.localStorage?.setItem(THEME_STORAGE_KEY, themeClass)
   }, [themeClass])
+
+  useEffect(() => {
+    if (!isUserMenuOpen) {
+      return undefined
+    }
+
+    const handlePointerDown = (event) => {
+      if (!userMenuRef.current?.contains(event.target)) {
+        setIsUserMenuOpen(false)
+      }
+    }
+
+    window.addEventListener('mousedown', handlePointerDown)
+    return () => window.removeEventListener('mousedown', handlePointerDown)
+  }, [isUserMenuOpen])
+
+  useEffect(() => {
+    if (!sessionState.authenticated) {
+      return undefined
+    }
+
+    const handleActivity = () => recordSessionActivity(false)
+    const handleApiActivity = () => recordSessionActivity(true)
+    const activityEvents = ['mousedown', 'keydown', 'touchstart', 'scroll']
+
+    activityEvents.forEach((eventName) =>
+      window.addEventListener(eventName, handleActivity, { passive: true }),
+    )
+    window.addEventListener(APP_ACTIVITY_EVENT, handleApiActivity)
+
+    return () => {
+      activityEvents.forEach((eventName) =>
+        window.removeEventListener(eventName, handleActivity),
+      )
+      window.removeEventListener(APP_ACTIVITY_EVENT, handleApiActivity)
+    }
+  }, [sessionState.authenticated])
 
   useEffect(() => {
     if (!sessionState.authenticated || !activePortfolioOwnerId) {
@@ -498,7 +592,7 @@ function App() {
         setSelectedId((current) =>
           current && nextDeposits.some((deposit) => deposit.id === current)
             ? current
-            : nextDeposits[0]?.id ?? null,
+            : null,
         )
       } catch (error) {
         if (!isMounted) {
@@ -522,6 +616,29 @@ function App() {
       isMounted = false
     }
   }, [activePortfolioOwnerId, portfolioReloadSeed, sessionState.authenticated])
+
+  useEffect(() => {
+    if (!sessionState.authenticated) {
+      return undefined
+    }
+
+    const elapsed = Date.now() - lastActivityAt
+    const warningDelay = Math.max(SESSION_WARNING_MS - elapsed, 0)
+    const timeoutDelay = Math.max(SESSION_TIMEOUT_MS - elapsed, 0)
+
+    const warningTimer = globalThis.setTimeout(() => {
+      setIsSessionWarningOpen(true)
+    }, warningDelay)
+
+    const timeoutTimer = globalThis.setTimeout(() => {
+      performLogout(true)
+    }, timeoutDelay)
+
+    return () => {
+      globalThis.clearTimeout(warningTimer)
+      globalThis.clearTimeout(timeoutTimer)
+    }
+  }, [lastActivityAt, sessionState.authenticated])
 
   useEffect(() => {
     if (!sessionState.authenticated) {
@@ -810,7 +927,7 @@ function App() {
   }, [activeDeposits, deferredSearch, investmentDateFrom, investmentDateTo, maturityDateFrom, maturityDateTo, ownerAliasLookup, searchScope, showClosed])
 
   const selectedDeposit =
-    activeDeposits.find((deposit) => deposit.id === selectedId) ?? activeDeposits[0] ?? null
+    filteredDeposits.find((deposit) => deposit.id === selectedId) ?? null
 
   const selectedInterestEvents = useMemo(
     () => (selectedDeposit ? generateInterestEvents(selectedDeposit) : []),
@@ -1424,6 +1541,7 @@ function App() {
     if (!nextSession.authenticated) {
       setSessionState(createEmptySessionState())
       setActivePortfolioOwnerId('')
+      setIsSessionWarningOpen(false)
       return null
     }
 
@@ -1438,6 +1556,7 @@ function App() {
 
       return nextSession.activePortfolioOwnerId || nextSession.user?.id || ''
     })
+    recordSessionActivity(true)
     return nextSession
   }
 
@@ -1454,6 +1573,7 @@ function App() {
       setActivePortfolioOwnerId(nextSession.activePortfolioOwnerId)
       setShareFeedback(null)
       setIsSettingsOpen(false)
+      recordSessionActivity(true)
     } catch (error) {
       setAuthError(error.message)
     } finally {
@@ -1461,25 +1581,7 @@ function App() {
     }
   }
 
-  const handleLogout = async () => {
-    try {
-      await requestJson('/api/auth/logout', { method: 'POST' })
-    } catch (error) {
-      console.error(error)
-    } finally {
-      setSessionState(createEmptySessionState())
-      setActivePortfolioOwnerId('')
-      setDeposits([])
-      setMasterData(emptyMasterData)
-      setSelectedId(null)
-      setSharesState({ ownerShares: [], sharedWithMe: [] })
-      setShareEmail('')
-      setShareFeedback(null)
-      setAuthError('')
-      setActiveTab('dashboard')
-      setIsSettingsOpen(false)
-    }
-  }
+  const handleLogout = async (silent = false) => performLogout(silent)
 
   const handleCreateShare = async (event) => {
     event.preventDefault()
@@ -2275,6 +2377,20 @@ function App() {
     }
 
     setActiveTab('admin')
+    setIsSettingsOpen(false)
+    setIsUserMenuOpen(false)
+  }
+
+  const closeMastersView = () => {
+    const nextTab =
+      mastersReturnTarget && mastersReturnTarget !== 'editor'
+        ? mastersReturnTarget
+        : mastersReturnTarget === 'editor'
+          ? 'editor'
+          : 'dashboard'
+
+    setActiveTab(nextTab)
+    setMastersReturnTarget(null)
   }
 
   const handleDownloadWorkbook = async () => {
@@ -2379,29 +2495,75 @@ function App() {
                   + Add Investment
                 </button>
               )}
-              <button
-                type="button"
-                className={isSettingsOpen ? 'icon-btn active' : 'icon-btn'}
-                onClick={() => setIsSettingsOpen((current) => !current)}
-                aria-label="Open settings"
-              >
-                {sessionState.user?.photoUrl && sessionState.user.photoUrl !== brokenAvatarUrl ? (
-                  <img
-                    className="topbar-avatar"
-                    src={sessionState.user.photoUrl}
-                    alt={sessionState.user.displayName}
-                    referrerPolicy="no-referrer"
-                    onError={() => setBrokenAvatarUrl(sessionState.user?.photoUrl || '__unknown__')}
-                  />
-                ) : (
-                  <div className="topbar-avatar fallback-avatar" aria-hidden="true">
-                    {String(sessionState.user?.displayName || sessionState.user?.email || 'Y')
-                      .trim()
-                      .slice(0, 1)
-                      .toUpperCase()}
+              <div className="user-menu-shell" ref={userMenuRef}>
+                <button
+                  type="button"
+                  className={isUserMenuOpen ? 'icon-btn active' : 'icon-btn'}
+                  onClick={() => setIsUserMenuOpen((current) => !current)}
+                  aria-label="Open account menu"
+                  aria-expanded={isUserMenuOpen}
+                >
+                  {sessionState.user?.photoUrl && sessionState.user.photoUrl !== brokenAvatarUrl ? (
+                    <img
+                      className="topbar-avatar"
+                      src={sessionState.user.photoUrl}
+                      alt={sessionState.user.displayName}
+                      referrerPolicy="no-referrer"
+                      onError={() => setBrokenAvatarUrl(sessionState.user?.photoUrl || '__unknown__')}
+                    />
+                  ) : (
+                    <div className="topbar-avatar fallback-avatar" aria-hidden="true">
+                      {String(sessionState.user?.displayName || sessionState.user?.email || 'Y')
+                        .trim()
+                        .slice(0, 1)
+                        .toUpperCase()}
+                    </div>
+                  )}
+                </button>
+                {isUserMenuOpen ? (
+                  <div className="user-menu panel">
+                    <div className="user-menu-copy">
+                      <strong>{sessionState.user?.displayName || 'Your account'}</strong>
+                      <span>{sessionState.user?.email}</span>
+                    </div>
+                    <button
+                      type="button"
+                      className="user-menu-item"
+                      onClick={() => openSettingsPanel('account')}
+                    >
+                      My account
+                    </button>
+                    <button
+                      type="button"
+                      className="user-menu-item"
+                      onClick={() => openSettingsPanel('sharing')}
+                    >
+                      Portfolio sharing
+                    </button>
+                    <button
+                      type="button"
+                      className="user-menu-item"
+                      onClick={() => openSettingsPanel('advanced')}
+                    >
+                      Backup & restore
+                    </button>
+                    <button
+                      type="button"
+                      className="user-menu-item"
+                      onClick={() => openSettingsPanel('advanced')}
+                    >
+                      More settings
+                    </button>
+                    <button
+                      type="button"
+                      className="user-menu-item warning"
+                      onClick={() => handleLogout(false)}
+                    >
+                      Logout
+                    </button>
                   </div>
-                )}
-              </button>
+                ) : null}
+              </div>
             </div>
           </div>
           {!isMobileEditorScreen && !isMobile && (
@@ -2437,15 +2599,15 @@ function App() {
           <div className="section-head">
             <div>
               <h2>Settings</h2>
-              <p>Manage access, portfolio ownership, and personal preferences.</p>
+              <p>Manage your account, sharing, backups, and other settings.</p>
             </div>
             <button
               type="button"
               className="secondary-btn compact ghost-btn"
               onClick={() => setIsSettingsOpen(false)}
-            >
-              Close
-            </button>
+              >
+                Close
+              </button>
           </div>
 
           <section className="settings-section settings-section-subtle settings-about-section">
@@ -2474,134 +2636,207 @@ function App() {
             </div>
           </section>
 
-          <PortfolioAccessPanel
-            isOwnerPortfolio={!isReadOnlyPortfolio}
-            activePortfolioLabel={activePortfolioLabel}
-            shareEmail={shareEmail}
-            setShareEmail={setShareEmail}
-            onCreateShare={handleCreateShare}
-            onDeleteShare={handleDeleteShare}
-            ownedShares={sharesState.ownerShares}
-            sharedWithMe={sharesState.sharedWithMe}
-            isSubmittingShare={isSubmittingShare}
-            shareFeedback={shareFeedback}
-          />
-
-          <section className="settings-section">
-            <div className="section-head">
-              <div>
-                <h2>Profile</h2>
-                <p>Your identity and the portfolio you are currently viewing.</p>
-              </div>
-            </div>
-
-            <div className="settings-profile">
-              {sessionState.user?.photoUrl && sessionState.user.photoUrl !== brokenAvatarUrl ? (
-                <img
-                  className="settings-avatar"
-                  src={sessionState.user.photoUrl}
-                  alt={sessionState.user.displayName}
-                  referrerPolicy="no-referrer"
-                  onError={() => setBrokenAvatarUrl(sessionState.user?.photoUrl || '__unknown__')}
-                />
-              ) : (
-                <div className="settings-avatar fallback-avatar" aria-hidden="true">
-                  {String(sessionState.user?.displayName || sessionState.user?.email || 'Y')
-                    .trim()
-                    .slice(0, 1)
-                    .toUpperCase()}
+          <div className="settings-accordion">
+            <section className="settings-accordion-item">
+              <button
+                type="button"
+                className="settings-accordion-toggle"
+                onClick={() => toggleSettingsSection('sharing')}
+                aria-expanded={expandedSettingsSection === 'sharing'}
+              >
+                <div>
+                  <strong>Portfolio sharing</strong>
+                  <span>Choose who can view this portfolio and how sharing works.</span>
                 </div>
-              )}
-              <div className="settings-profile-copy">
-                <strong>{sessionState.user?.displayName}</strong>
-                <span>{sessionState.user?.email}</span>
-              </div>
-            </div>
-
-            <div className="settings-grid">
-              <div className="field settings-static-field">
-                <span>Role</span>
-                <strong>{isAdminUser ? 'Admin' : 'User'}</strong>
-              </div>
-
-              <label className="field">
-                <span>Viewing portfolio</span>
-                <select
-                  value={activePortfolioOwnerId}
-                  onChange={(event) => setActivePortfolioOwnerId(event.target.value)}
-                >
-                  {sessionState.accessiblePortfolios.map((portfolio) => (
-                    <option key={portfolio.ownerUserId} value={portfolio.ownerUserId}>
-                      {portfolio.accessType === 'owner'
-                        ? 'My portfolio'
-                        : `${portfolio.ownerDisplayName}${portfolio.accessType === 'admin' ? '' : ' (Shared)'}`}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-          </section>
-
-          <section className="settings-section settings-section-subtle">
-            <div className="section-head">
-              <div>
-                <h2>Preferences</h2>
-                <p>Personal display choices for your own session.</p>
-              </div>
-            </div>
-
-            <div className="settings-grid settings-grid-compact">
-              <label className="field">
-                <span>Theme</span>
-                <select value={themeClass} onChange={(event) => setThemeClass(event.target.value)}>
-                  <option value="theme-midnight-navy">Midnight Navy</option>
-                  <option value="theme-professional">Professional</option>
-                  <option value="theme-cream">Cream</option>
-                </select>
-              </label>
-            </div>
-          </section>
-
-          <section className="settings-section settings-section-subtle">
-            <div className="section-head">
-              <div>
-                <h2>Advanced settings</h2>
-                <p>Reference data and admin utilities.</p>
-              </div>
-            </div>
-
-            {canEditPortfolio && (
-              <BackupRestorePanel
-                ownerUserId={activePortfolioOwnerId}
-                portfolioLabel={activePortfolioLabel}
-                isReadOnly={isReadOnlyPortfolio}
-                onRestoreSuccess={handleBackupRestoreSuccess}
-              />
-            )}
-
-            <div className="settings-actions">
-              {canUseAdmin && (
-                <button type="button" className="secondary-btn compact" onClick={openAdmin}>
-                  Open Admin
-                </button>
-              )}
-              {canEditPortfolio && (
-                <button
-                  type="button"
-                  className="secondary-btn compact"
-                  onClick={() => {
-                    setActiveTab('masters')
-                    setIsSettingsOpen(false)
-                  }}
-                >
-                  Open Masters
-                </button>
-              )}
-              <button type="button" className="secondary-btn compact" onClick={handleLogout}>
-                Logout
+                <span className="settings-accordion-indicator" aria-hidden="true">
+                  {expandedSettingsSection === 'access' ? '−' : '+'}
+                </span>
               </button>
-            </div>
-          </section>
+              {expandedSettingsSection === 'sharing' ? (
+                <PortfolioAccessPanel
+                  isOwnerPortfolio={!isReadOnlyPortfolio}
+                  activePortfolioLabel={activePortfolioLabel}
+                  shareEmail={shareEmail}
+                  setShareEmail={setShareEmail}
+                  onCreateShare={handleCreateShare}
+                  onDeleteShare={handleDeleteShare}
+                  ownedShares={sharesState.ownerShares}
+                  sharedWithMe={sharesState.sharedWithMe}
+                  isSubmittingShare={isSubmittingShare}
+                  shareFeedback={shareFeedback}
+                  showHeader={false}
+                />
+              ) : null}
+            </section>
+
+            <section className="settings-accordion-item">
+              <button
+                type="button"
+                className="settings-accordion-toggle"
+                onClick={() => toggleSettingsSection('account')}
+                aria-expanded={expandedSettingsSection === 'account'}
+              >
+                <div>
+                  <strong>My account</strong>
+                  <span>Your account details and the portfolio you are currently viewing.</span>
+                </div>
+                <span className="settings-accordion-indicator" aria-hidden="true">
+                  {expandedSettingsSection === 'profile' ? '−' : '+'}
+                </span>
+              </button>
+              {expandedSettingsSection === 'account' ? (
+                <section className="settings-section">
+                  <div className="settings-profile">
+                    {sessionState.user?.photoUrl && sessionState.user.photoUrl !== brokenAvatarUrl ? (
+                      <img
+                        className="settings-avatar"
+                        src={sessionState.user.photoUrl}
+                        alt={sessionState.user.displayName}
+                        referrerPolicy="no-referrer"
+                        onError={() => setBrokenAvatarUrl(sessionState.user?.photoUrl || '__unknown__')}
+                      />
+                    ) : (
+                      <div className="settings-avatar fallback-avatar" aria-hidden="true">
+                        {String(sessionState.user?.displayName || sessionState.user?.email || 'Y')
+                          .trim()
+                          .slice(0, 1)
+                          .toUpperCase()}
+                      </div>
+                    )}
+                    <div className="settings-profile-copy">
+                      <strong>{sessionState.user?.displayName}</strong>
+                      <span>{sessionState.user?.email}</span>
+                    </div>
+                  </div>
+
+                  <div className="settings-grid">
+                    <div className="field settings-static-field">
+                      <span>Role</span>
+                      <strong>{isAdminUser ? 'Admin' : 'User'}</strong>
+                    </div>
+
+                    <label className="field">
+                      <span>Viewing portfolio</span>
+                      <select
+                        value={activePortfolioOwnerId}
+                        onChange={(event) => setActivePortfolioOwnerId(event.target.value)}
+                      >
+                        {sessionState.accessiblePortfolios.map((portfolio) => (
+                          <option key={portfolio.ownerUserId} value={portfolio.ownerUserId}>
+                            {portfolio.accessType === 'owner'
+                              ? 'My portfolio'
+                              : `${portfolio.ownerDisplayName}${portfolio.accessType === 'admin' ? '' : ' (Shared)'}`}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                </section>
+              ) : null}
+            </section>
+
+            <section className="settings-accordion-item">
+              <button
+                type="button"
+                className="settings-accordion-toggle"
+                onClick={() => toggleSettingsSection('appearance')}
+                aria-expanded={expandedSettingsSection === 'appearance'}
+              >
+                <div>
+                  <strong>Appearance</strong>
+                  <span>Theme and display choices for this session.</span>
+                </div>
+                <span className="settings-accordion-indicator" aria-hidden="true">
+                  {expandedSettingsSection === 'preferences' ? '−' : '+'}
+                </span>
+              </button>
+              {expandedSettingsSection === 'appearance' ? (
+                <section className="settings-section settings-section-subtle">
+                  <div className="settings-grid settings-grid-compact">
+                    <label className="field">
+                      <span>Theme</span>
+                      <select value={themeClass} onChange={(event) => setThemeClass(event.target.value)}>
+                        <option value="theme-midnight-navy">Midnight Navy</option>
+                        <option value="theme-professional">Professional</option>
+                        <option value="theme-cream">Cream</option>
+                      </select>
+                    </label>
+                  </div>
+                </section>
+              ) : null}
+            </section>
+
+            <section className="settings-accordion-item">
+              <button
+                type="button"
+                className="settings-accordion-toggle"
+                onClick={() => toggleSettingsSection('advanced')}
+                aria-expanded={expandedSettingsSection === 'advanced'}
+              >
+                <div>
+                  <strong>Advanced</strong>
+                  <span>Backup, restore, and other less frequently used tools.</span>
+                </div>
+                <span className="settings-accordion-indicator" aria-hidden="true">
+                  {expandedSettingsSection === 'advanced' ? '−' : '+'}
+                </span>
+              </button>
+              {expandedSettingsSection === 'advanced' ? (
+                <section className="settings-section settings-section-subtle">
+                  <div className="settings-subsection">
+                    <div className="section-head">
+                      <div>
+                        <h2>Backup &amp; restore</h2>
+                        <p>Protect your data with backups and restore only when needed.</p>
+                      </div>
+                    </div>
+                    {canEditPortfolio ? (
+                      <BackupRestorePanel
+                        ownerUserId={activePortfolioOwnerId}
+                        portfolioLabel={activePortfolioLabel}
+                        loginEmail={sessionState.user?.email || ''}
+                        isReadOnly={isReadOnlyPortfolio}
+                        onRestoreSuccess={handleBackupRestoreSuccess}
+                      />
+                    ) : (
+                      <p className="settings-subsection-empty">
+                        Backup and restore are available only when you can edit this portfolio.
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="settings-subsection">
+                    <div className="section-head">
+                      <div>
+                        <h2>System Configuration</h2>
+                        <p>Reference data and admin tools used less often.</p>
+                      </div>
+                    </div>
+                    <div className="settings-actions">
+                      {canUseAdmin && (
+                        <button type="button" className="secondary-btn compact" onClick={openAdmin}>
+                          Open Admin
+                        </button>
+                      )}
+                      {canEditPortfolio && (
+                        <button
+                          type="button"
+                          className="secondary-btn compact"
+                          onClick={() => {
+                            setMastersReturnTarget(visibleActiveTab)
+                            setActiveTab('masters')
+                            setIsSettingsOpen(false)
+                          }}
+                        >
+                          Open Masters
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </section>
+              ) : null}
+            </section>
+          </div>
         </section>
       )}
 
@@ -3161,6 +3396,7 @@ function App() {
           setShowClosed={setShowClosed}
           filteredDeposits={filteredDeposits}
           selectedId={selectedId}
+          setSelectedId={setSelectedId}
           selectedDeposit={selectedDeposit}
           selectedSourceEvents={selectedSourceEvents}
           selectedReinvestmentSummary={selectedReinvestmentSummary}
@@ -3253,6 +3489,7 @@ function App() {
           mastersFeedback={mastersFeedback}
           initialIntent={mastersIntent}
           saveMasterData={saveMasterData}
+          onClose={closeMastersView}
           returnToEditor={() => {
             setActiveTab('editor')
             setMastersReturnTarget(null)
@@ -3273,6 +3510,51 @@ function App() {
         />
         </div>
       )}
+
+      {isSessionWarningOpen ? (
+        <div
+          className="about-modal-backdrop"
+          role="presentation"
+          onClick={() => setIsSessionWarningOpen(false)}
+        >
+          <section
+            className="about-modal panel session-warning-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="session-warning-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="section-head">
+              <div>
+                <h2 id="session-warning-title">Session expiring soon</h2>
+                <p>Your session will expire in 5 minutes due to inactivity.</p>
+              </div>
+            </div>
+            <div className="backup-warning-card">
+              <strong>Stay signed in to keep working.</strong>
+              <p>
+                Move the mouse, press a key, or choose an action below to keep your session active.
+              </p>
+            </div>
+            <div className="backup-confirm-modal-actions">
+              <button
+                type="button"
+                className="secondary-btn compact ghost-btn"
+                onClick={() => recordSessionActivity(true)}
+              >
+                Stay signed in
+              </button>
+              <button
+                type="button"
+                className="primary-btn compact-btn"
+                onClick={() => handleLogout(false)}
+              >
+                Logout now
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       <footer className="app-footer-signature">
         <span>Built by Parth Dave</span>

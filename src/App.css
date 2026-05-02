@@ -261,16 +261,16 @@
 }
 
 .app-header {
-  position: static;
+  position: relative;
   top: auto;
-  z-index: auto;
+  z-index: 30;
   margin-bottom: 10px;
   border-radius: 20px;
   background: color-mix(in srgb, var(--card-bg) 94%, transparent);
   border: 1px solid var(--border-color);
   backdrop-filter: blur(14px);
   box-shadow: 0 14px 28px var(--shadow-color);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .app-topbar {
@@ -480,6 +480,64 @@
   flex-wrap: wrap;
 }
 
+.settings-accordion {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-accordion-item {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-accordion-toggle {
+  width: 100%;
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--card-bg) 88%, transparent);
+  color: inherit;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  text-align: left;
+  padding: 14px 16px;
+  cursor: pointer;
+}
+
+.settings-accordion-toggle strong {
+  display: block;
+  color: var(--text-primary);
+  font-size: 0.92rem;
+}
+
+.settings-accordion-toggle span {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.settings-accordion-indicator {
+  color: var(--text-primary);
+  font-size: 1.15rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.settings-subsection {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--card-bg) 90%, transparent);
+}
+
+.settings-subsection-empty {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+}
+
 .backup-panel {
   display: grid;
   gap: 16px;
@@ -525,10 +583,33 @@
 }
 
 .backup-restore-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
   align-items: end;
-  flex-wrap: wrap;
+}
+
+.backup-restore-actions .field {
+  padding-bottom: 0;
+}
+
+.backup-restore-actions .field input[type="file"] {
+  min-height: 44px;
+  padding: 10px 12px;
+}
+
+.backup-restore-actions .secondary-btn {
+  align-self: end;
+  min-width: 140px;
+}
+
+.backup-restore-note {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--warning-border) 70%, var(--border-color));
+  background: color-mix(in srgb, var(--warning-bg) 72%, var(--panel-bg-muted));
+  color: var(--text-secondary);
+  font-size: 0.82rem;
 }
 
 .backup-drive-note {
@@ -608,6 +689,25 @@
 .backup-confirm-actions {
   display: flex;
   justify-content: flex-start;
+}
+
+.backup-confirm-modal {
+  width: min(100%, 560px);
+}
+
+.session-warning-modal {
+  width: min(100%, 520px);
+}
+
+.backup-confirm-modal-copy {
+  display: grid;
+  gap: 12px;
+}
+
+.backup-confirm-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .share-permission-note {
@@ -3393,6 +3493,60 @@
   background: var(--accent-soft-strong);
 }
 
+.user-menu-shell {
+  position: relative;
+}
+
+.user-menu {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 40;
+  min-width: 220px;
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border-radius: 16px;
+  box-shadow: 0 18px 36px color-mix(in srgb, var(--shadow-color) 120%, transparent);
+}
+
+.user-menu-copy {
+  display: grid;
+  gap: 2px;
+  padding: 6px 8px 10px;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 4px;
+}
+
+.user-menu-copy strong {
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.user-menu-copy span {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.user-menu-item {
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background 180ms ease, color 180ms ease;
+}
+
+.user-menu-item:hover {
+  background: color-mix(in srgb, var(--accent-color) 10%, transparent);
+}
+
+.user-menu-item.warning {
+  color: var(--warning-text-strong);
+}
+
 .mobile-help-sheet {
   display: none;
 }
@@ -3403,8 +3557,9 @@
 
 @media (min-width: 781px) {
   .app-header {
-    position: static;
+    position: relative;
     top: auto;
+    z-index: 30;
   }
 
   .app-topbar {
@@ -3786,6 +3941,24 @@
   }
 
   .backup-confirm-actions .primary-btn {
+    width: 100%;
+  }
+
+  .backup-restore-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .backup-restore-actions .secondary-btn {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .backup-confirm-modal-actions {
+    flex-direction: column-reverse;
+  }
+
+  .backup-confirm-modal-actions .secondary-btn,
+  .backup-confirm-modal-actions .primary-btn {
     width: 100%;
   }
 }

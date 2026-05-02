@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import BulkImportPanel from '../import/BulkImportPanel.jsx'
 import { formatInterestRate, generateInterestEvents, getCalculationFrequencyLabel } from './depositModel.js'
 
@@ -31,6 +31,7 @@ export default function DepositsView({
   setShowClosed,
   filteredDeposits,
   selectedId,
+  setSelectedId,
   selectedDeposit,
   selectedSourceEvents,
   selectedReinvestmentSummary,
@@ -107,6 +108,21 @@ export default function DepositsView({
       }),
     [filteredDeposits, investmentTypeFilter, ownerFilter],
   )
+
+  const detailDeposit =
+    selectedDeposit && viewFilteredDeposits.some((deposit) => deposit.id === selectedDeposit.id)
+      ? selectedDeposit
+      : null
+
+  useEffect(() => {
+    if (!selectedId) {
+      return
+    }
+
+    if (!viewFilteredDeposits.some((deposit) => deposit.id === selectedId)) {
+      setSelectedId(null)
+    }
+  }, [selectedId, setSelectedId, viewFilteredDeposits])
 
   const groupedDeposits = useMemo(() => {
     const groupMap = new Map()
@@ -949,7 +965,7 @@ export default function DepositsView({
 
   const depositDetailPanel = (
     <article className="panel detail-panel">
-      {selectedDeposit ? (
+      {detailDeposit ? (
         <>
           {isMobile && (
             <div className="mobile-detail-header">
