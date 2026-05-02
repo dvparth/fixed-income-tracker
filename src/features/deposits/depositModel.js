@@ -46,6 +46,14 @@ export const formatCurrency = (value) => {
   }).format(Number(value))}`
 }
 
+export const formatInterestRate = (value) => {
+  if (value === '' || value === null || value === undefined || Number.isNaN(Number(value))) {
+    return '--'
+  }
+
+  return `${Number(Number(value).toFixed(2)).toString()}%`
+}
+
 export const computeTdsAmount = (maturityBeforeTax, maturityAfterTax) => {
   const grossAmount = parseNumber(maturityBeforeTax)
   const netAmount = parseNumber(maturityAfterTax)

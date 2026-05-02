@@ -1,5 +1,6 @@
+import { useMemo, useState } from 'react'
 import BulkImportPanel from '../import/BulkImportPanel.jsx'
-import { getCalculationFrequencyLabel } from './depositModel.js'
+import { formatInterestRate, generateInterestEvents, getCalculationFrequencyLabel } from './depositModel.js'
 
 const SHOW_BULK_IMPORT = false
 
@@ -65,12 +66,336 @@ export default function DepositsView({
   todayTime,
   canDeletePortfolio,
 }) {
-  const formatInterestRate = (value) => {
-    if (value === '' || value === null || value === undefined || Number.isNaN(Number(value))) {
-      return '--'
+  const [ownerFilter, setOwnerFilter] = useState('all')
+  const [investmentTypeFilter, setInvestmentTypeFilter] = useState('all')
+  const [showAllDepositGroups, setShowAllDepositGroups] = useState(false)
+  const [expandedGroupKeys, setExpandedGroupKeys] = useState({})
+  const [expandedStatusSections, setExpandedStatusSections] = useState({})
+  const [expandedTimelineItems, setExpandedTimelineItems] = useState({})
+
+  const getContributionAmount = (deposit) => {
+    const grossMaturity = Number(deposit.maturityBeforeTax || 0)
+    const principal = Number(deposit.principalAmount || 0)
+    const totalInterestEarned = Number(deposit.totalInterestEarned || 0)
+
+    if (grossMaturity > 0 && principal > 0) {
+      return Math.max(grossMaturity - principal, 0)
     }
 
-    return `${Number(Number(value).toFixed(4)).toString()}%`
+    return Math.max(totalInterestEarned, 0)
+  }
+
+  const ownerOptions = useMemo(
+    () => Array.from(new Set(filteredDeposits.map((deposit) => String(deposit.holderName || '').trim()).filter(Boolean))).sort(),
+    [filteredDeposits],
+  )
+
+  const investmentTypeOptions = useMemo(
+    () => Array.from(new Set(filteredDeposits.map((deposit) => String(deposit.instrumentType || '').trim()).filter(Boolean))).sort(),
+    [filteredDeposits],
+  )
+
+  const viewFilteredDeposits = useMemo(
+    () =>
+      filteredDeposits.filter((deposit) => {
+        const ownerMatches =
+          ownerFilter === 'all' || String(deposit.holderName || '').trim() === ownerFilter
+        const typeMatches =
+          investmentTypeFilter === 'all' || String(deposit.instrumentType || '').trim() === investmentTypeFilter
+
+        return ownerMatches && typeMatches
+      }),
+    [filteredDeposits, investmentTypeFilter, ownerFilter],
+  )
+
+  const groupedDeposits = useMemo(() => {
+    const groupMap = new Map()
+
+    viewFilteredDeposits.forEach((deposit) => {
+      const groupKey = [
+        String(deposit.holderName || '').trim(),
+        String(deposit.bankName || '').trim(),
+        String(deposit.instrumentType || '').trim(),
+        Number(deposit.principalAmount || 0),
+        Number(deposit.interestRate || 0).toFixed(2),
+        String(getPayoutModeLabel(deposit) || '').trim(),
+        String(deposit.status || '').trim(),
+      ].join('::')
+
+      const current = groupMap.get(groupKey) || {
+        id: groupKey,
+        ownerLabel: String(deposit.holderName || 'Unassigned').trim() || 'Unassigned',
+        institutionName: String(deposit.bankName || 'Bank not set').trim() || 'Bank not set',
+        instrumentType: String(deposit.instrumentType || 'Investment').trim() || 'Investment',
+        principalAmount: Number(deposit.principalAmount || 0),
+        interestRate: Number(deposit.interestRate || 0),
+        payoutLabel: getPayoutModeLabel(deposit),
+        status: deposit.status,
+        count: 0,
+        totalPrincipal: 0,
+        totalContribution: 0,
+        nextMaturityDate: deposit.maturityDate,
+        nextInterestDate: '',
+        nextInterestAmount: 0,
+        items: [],
+      }
+
+      current.count += 1
+      current.totalPrincipal += Number(deposit.principalAmount || 0)
+      current.totalContribution += getContributionAmount(deposit)
+      current.items.push(deposit)
+
+      if (
+        !current.nextMaturityDate ||
+        (deposit.maturityDate && new Date(`${deposit.maturityDate}T00:00:00`) < new Date(`${current.nextMaturityDate}T00:00:00`))
+      ) {
+        current.nextMaturityDate = deposit.maturityDate
+      }
+
+      const nextInterestEvent = generateInterestEvents(deposit).find(
+        (event) => new Date(`${event.date}T00:00:00`).getTime() >= todayTime,
+      )
+
+      if (
+        nextInterestEvent &&
+        (!current.nextInterestDate ||
+          new Date(`${nextInterestEvent.date}T00:00:00`).getTime() <
+            new Date(`${current.nextInterestDate}T00:00:00`).getTime())
+      ) {
+        current.nextInterestDate = nextInterestEvent.date
+        current.nextInterestAmount = Number(nextInterestEvent.amount || 0)
+      } else if (
+        nextInterestEvent &&
+        current.nextInterestDate &&
+        nextInterestEvent.date === current.nextInterestDate
+      ) {
+        current.nextInterestAmount += Number(nextInterestEvent.amount || 0)
+      }
+
+      groupMap.set(groupKey, current)
+    })
+
+    return Array.from(groupMap.values()).sort((left, right) => {
+      if (right.totalContribution !== left.totalContribution) {
+        return right.totalContribution - left.totalContribution
+      }
+
+      return right.totalPrincipal - left.totalPrincipal
+    })
+  }, [getPayoutModeLabel, todayTime, viewFilteredDeposits])
+
+  const statusGroupedDeposits = useMemo(() => {
+    const upcomingCutoff = new Date(todayTime)
+    upcomingCutoff.setDate(upcomingCutoff.getDate() + 45)
+    const getMaturitySortValue = (group) => {
+      if (!group.nextMaturityDate) {
+        return Number.MAX_SAFE_INTEGER
+      }
+
+      const time = new Date(`${group.nextMaturityDate}T00:00:00`).getTime()
+      return Number.isNaN(time) ? Number.MAX_SAFE_INTEGER : time
+    }
+    const getInterestSortValue = (group) => {
+      if (!group.nextInterestDate) {
+        return Number.MAX_SAFE_INTEGER
+      }
+
+      const time = new Date(`${group.nextInterestDate}T00:00:00`).getTime()
+      return Number.isNaN(time) ? Number.MAX_SAFE_INTEGER : time
+    }
+    const sortByNearestMaturity = (left, right) => {
+      const maturityDifference = getMaturitySortValue(left) - getMaturitySortValue(right)
+      if (maturityDifference !== 0) {
+        return maturityDifference
+      }
+
+      if (right.totalPrincipal !== left.totalPrincipal) {
+        return right.totalPrincipal - left.totalPrincipal
+      }
+
+      return right.count - left.count
+    }
+    const sortByIncomingCashPriority = (left, right) => {
+      const interestDifference = getInterestSortValue(left) - getInterestSortValue(right)
+      if (interestDifference !== 0) {
+        return interestDifference
+      }
+
+      const maturityDifference = getMaturitySortValue(left) - getMaturitySortValue(right)
+      if (maturityDifference !== 0) {
+        return maturityDifference
+      }
+
+      if (right.totalContribution !== left.totalContribution) {
+        return right.totalContribution - left.totalContribution
+      }
+
+      return right.totalPrincipal - left.totalPrincipal
+    }
+    const sortByActiveOperationalPriority = (left, right) => {
+      const maturityDifference = getMaturitySortValue(left) - getMaturitySortValue(right)
+      if (maturityDifference !== 0) {
+        return maturityDifference
+      }
+
+      if (right.totalPrincipal !== left.totalPrincipal) {
+        return right.totalPrincipal - left.totalPrincipal
+      }
+
+      return right.totalContribution - left.totalContribution
+    }
+
+    const isMaturingSoon = (group) => {
+      if (String(group.status || '').trim().toLowerCase() === 'closed' || !group.nextMaturityDate) {
+        return false
+      }
+
+      const maturityDate = new Date(`${group.nextMaturityDate}T00:00:00`)
+      return maturityDate >= new Date(todayTime) && maturityDate <= upcomingCutoff
+    }
+
+    const isInterestIncoming = (group) =>
+      String(group.status || '').trim().toLowerCase() !== 'closed' &&
+      Boolean(group.nextInterestDate)
+
+    const maturingSoon = groupedDeposits.filter(isMaturingSoon).sort(sortByNearestMaturity)
+    const interestIncoming = groupedDeposits.filter(isInterestIncoming).sort(sortByIncomingCashPriority)
+    const activeDeposits = groupedDeposits.filter(
+      (group) =>
+        String(group.status || '').trim().toLowerCase() !== 'closed' &&
+        !isMaturingSoon(group) &&
+        !isInterestIncoming(group),
+    ).sort(sortByActiveOperationalPriority)
+    const closedDeposits = groupedDeposits.filter(
+      (group) => String(group.status || '').trim().toLowerCase() === 'closed',
+    ).sort(sortByNearestMaturity)
+
+    return [
+      {
+        key: 'maturingSoon',
+        title: 'Maturing soon',
+        description: 'Deposits that may need rollover or reinvestment planning shortly.',
+        groups: maturingSoon,
+      },
+      {
+        key: 'interestIncoming',
+        title: 'Interest incoming',
+        description: 'Payout deposits that can bring cash back before maturity.',
+        groups: interestIncoming,
+      },
+      {
+        key: 'active',
+        title: 'Running deposits',
+        description: 'Open deposits that are still running without an immediate cash event.',
+        groups: activeDeposits,
+      },
+      ...(showClosed
+        ? [{
+            key: 'closed',
+            title: 'Archived deposits',
+            description: 'Completed deposits kept for reference and lineage.',
+            groups: closedDeposits,
+          }]
+        : []),
+    ]
+  }, [groupedDeposits, showClosed, todayTime])
+
+  const toggleDepositGroup = (groupId) => {
+    setExpandedGroupKeys((current) => ({
+      ...current,
+      [groupId]: !current[groupId],
+    }))
+  }
+
+  const toggleStatusSection = (sectionKey) => {
+    setExpandedStatusSections((current) => ({
+      ...current,
+      [sectionKey]: !current[sectionKey],
+    }))
+  }
+
+  const toggleTimelineItem = (itemKey) => {
+    setExpandedTimelineItems((current) => ({
+      ...current,
+      [itemKey]: !current[itemKey],
+    }))
+  }
+
+  const renderStatusBucketPreview = (group, sectionKey) => {
+    const previewDate =
+      sectionKey === 'interestIncoming'
+        ? (group.nextInterestDate || group.nextMaturityDate)
+        : group.nextMaturityDate
+    const previewAmount =
+      sectionKey === 'interestIncoming' ? group.nextInterestAmount : group.totalPrincipal
+    const previewVerb =
+      sectionKey === 'interestIncoming'
+        ? `${formatCurrency(previewAmount)} payout`
+        : `Matures ${formatDate(previewDate)}`
+
+    return (
+      <div key={`${sectionKey}-${group.id}`} className="deposit-status-preview-item">
+        <strong>{group.institutionName} {formatCurrency(group.principalAmount)}</strong>
+        <span>{group.ownerLabel} • {previewVerb}</span>
+      </div>
+    )
+  }
+
+  const renderDepositGroupCard = (group, sectionKey = 'active') => {
+    const isExpanded = Boolean(expandedGroupKeys[group.id])
+    const actionDateLabel = sectionKey === 'interestIncoming' ? 'Next cash' : 'Next maturity'
+    const actionDateValue =
+      sectionKey === 'interestIncoming'
+        ? (group.nextInterestDate || group.nextMaturityDate)
+        : group.nextMaturityDate
+    const middleMetricLabel = sectionKey === 'interestIncoming' ? 'Upcoming cash' : 'Interest contribution'
+    const middleMetricValue = sectionKey === 'interestIncoming'
+      ? group.nextInterestAmount
+      : group.totalContribution
+
+    return (
+      <article key={group.id} className="deposit-group-card">
+        <button
+          type="button"
+          className="deposit-group-head"
+          onClick={() => toggleDepositGroup(group.id)}
+        >
+          <div className="deposit-group-copy">
+            <strong>{formatCurrency(group.principalAmount)} {group.instrumentType}{group.count > 1 ? ` (${group.count})` : ''}</strong>
+            <span>{group.ownerLabel} • {group.institutionName} • {formatInterestRate(group.interestRate)} • {group.payoutLabel}</span>
+          </div>
+          <div className="deposit-group-metrics">
+            <div>
+              <span>Total principal</span>
+              <strong>{formatCurrency(group.totalPrincipal)}</strong>
+            </div>
+            <div>
+              <span>{middleMetricLabel}</span>
+              <strong>{formatCurrency(middleMetricValue)}</strong>
+            </div>
+            <div>
+              <span>{actionDateLabel}</span>
+              <strong>{formatDate(actionDateValue)}</strong>
+            </div>
+          </div>
+        </button>
+
+        {isExpanded ? (
+          <div className="deposit-group-items">
+            {group.items.map((deposit) => (
+              <button
+                key={deposit.id}
+                type="button"
+                className={selectedId === deposit.id ? 'deposit-card selected clickable-surface deposit-item-row' : 'deposit-card clickable-surface deposit-item-row'}
+                onClick={() => openDepositDetail(deposit.id)}
+              >
+                {renderDepositCard(deposit)}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </article>
+    )
   }
 
   const renderMaturityUsageContent = () => {
@@ -212,6 +537,108 @@ export default function DepositsView({
     </>
   )
 
+  const nextPendingInterestEvent = selectedInterestSummary?.eventRows.find((event) => !event.isDue) || null
+
+  const nextActionConfig = selectedDeposit
+    ? selectedReinvestmentSummary?.isRealized && selectedReinvestmentSummary.uninvestedAmount > 0
+      ? {
+          title: `Reinvest ${formatCurrency(selectedReinvestmentSummary.uninvestedAmount)}`,
+          detail: 'Maturity cash is available and waiting to be allocated into the next investment.',
+          ctaLabel: isReadOnly ? '' : 'Allocate maturity cash',
+          onClick: isReadOnly ? null : fillFromSelectedMaturity,
+        }
+      : selectedInterestSummary?.totalDueUnallocated > 0
+        ? {
+            title: `Reinvest ${formatCurrency(selectedInterestSummary.totalDueUnallocated)}`,
+            detail: 'Interest cash has been received and is still available to fund another deposit.',
+            ctaLabel: isReadOnly ? '' : 'Allocate interest cash',
+            onClick: isReadOnly ? null : fillFromAllAvailableInterest,
+          }
+        : isPastMaturityOpen(selectedDeposit)
+          ? {
+              title: 'Review this matured deposit',
+              detail: 'The maturity date has passed but the deposit is still marked open.',
+              ctaLabel: '',
+              onClick: null,
+            }
+          : nextPendingInterestEvent
+            ? {
+                title: `Next cash expected ${formatDate(nextPendingInterestEvent.date)}`,
+                detail: `Expected receipt ${formatCurrency(nextPendingInterestEvent.amount)} after TDS.`,
+                ctaLabel: '',
+                onClick: null,
+              }
+            : {
+                title: 'No action required',
+                detail: 'This deposit does not need an immediate reinvestment or cashflow action.',
+                ctaLabel: '',
+                onClick: null,
+              }
+    : null
+
+  const cashStatusSummary = selectedDeposit
+    ? {
+        received:
+          (selectedReinvestmentSummary?.isRealized ? Number(selectedReinvestmentSummary.availableAmount || 0) : 0) +
+          Number(selectedInterestSummary?.totalDueExpected || 0),
+        reinvested:
+          Number(selectedReinvestmentSummary?.reinvestedAmount || 0) +
+          Number(selectedInterestSummary?.totalDueAllocated || 0),
+        expected:
+          (!selectedReinvestmentSummary?.isRealized
+            ? Number(selectedReinvestmentSummary?.availableAmount || 0)
+            : 0) + Number(selectedInterestSummary?.totalFutureExpected || 0),
+        availableNow:
+          (selectedReinvestmentSummary?.isRealized
+            ? Number(selectedReinvestmentSummary?.uninvestedAmount || 0)
+            : 0) + Number(selectedInterestSummary?.totalDueUnallocated || 0),
+      }
+    : null
+
+  const detailTimelineItems = selectedDeposit
+    ? [
+        {
+          key: `maturity-${selectedDeposit.id}`,
+          kind: 'Maturity',
+          date: selectedDeposit.maturityDate,
+          amount:
+            selectedDeposit.maturityAfterTax ||
+            selectedDeposit.maturityBeforeTax ||
+            selectedDeposit.principalAmount,
+          status:
+            selectedReinvestmentSummary?.isRealized
+              ? 'Received'
+              : selectedDeposit.status === 'Closed'
+                ? 'Closed'
+                : 'Expected',
+          detail: selectedReinvestmentSummary?.isRealized
+            ? `Available ${formatCurrency(selectedReinvestmentSummary.uninvestedAmount)} after reinvested and settled amounts.`
+            : 'Maturity cash is not realized yet.',
+          canAllocate: Boolean(
+            !isReadOnly &&
+              selectedReinvestmentSummary?.isRealized &&
+              selectedReinvestmentSummary.uninvestedAmount > 0,
+          ),
+          onAllocate: fillFromSelectedMaturity,
+        },
+        ...(selectedInterestSummary?.eventRows || []).map((event) => ({
+          key: event.eventId,
+          kind: 'Interest',
+          date: event.date,
+          amount: event.amount,
+          status: event.isDue ? 'Received' : 'Expected',
+          detail: event.isDue
+            ? `Reinvested ${formatCurrency(event.allocatedWithinEventAmount)} • Left ${formatCurrency(event.unallocatedAmount)}`
+            : `Pre-TDS ${formatCurrency(event.grossAmount)} • Post-TDS ${formatCurrency(event.amount)}`,
+          canAllocate: Boolean(!isReadOnly && event.isDue && event.unallocatedAmount > 0),
+          onAllocate: () => applyCashFlowSource(event),
+        })),
+      ].sort(
+        (left, right) =>
+          new Date(`${left.date}T00:00:00`).getTime() - new Date(`${right.date}T00:00:00`).getTime(),
+      )
+    : []
+
   const renderMobileDetailSection = (sectionKey, title, subtitle, children) => (
     <section className="mobile-detail-section">
       <button
@@ -270,7 +697,7 @@ export default function DepositsView({
       <div className="section-head">
         <div>
           <h2>Deposits</h2>
-          <p>Search by bank, holder, alias like mummy or wife, instrument, account number, investment id, or source event.</p>
+          <p>Track deposits by maturity, payout timing, and current lifecycle status.</p>
         </div>
         {!isReadOnly && (
           <button type="button" className="secondary-btn compact" onClick={startNewDeposit}>
@@ -288,12 +715,25 @@ export default function DepositsView({
         />
       )}
 
+      <section className="deposit-management-summary">
+        <div className="interest-summary-grid">
+          <div className="interest-summary-card">
+            <span>Visible deposits</span>
+            <strong>{viewFilteredDeposits.length}</strong>
+          </div>
+          <div className="interest-summary-card">
+            <span>Status groups</span>
+            <strong>{groupedDeposits.length}</strong>
+          </div>
+        </div>
+      </section>
+
       {isMobile ? (
         <div className="mobile-filter-shell">
           <div className="mobile-filter-summary">
             <div>
               <strong>Filters</strong>
-              <span>{hasActiveDepositFilters ? 'Active filters applied' : 'Browse all deposits'}</span>
+              <span>{hasActiveDepositFilters || ownerFilter !== 'all' || investmentTypeFilter !== 'all' ? 'Active filters applied' : 'Browse deposits by status'}</span>
               {mobileFilterBadges.length > 0 && (
                 <div className="mobile-filter-badges">
                   {mobileFilterBadges.map((badge) => (
@@ -314,8 +754,8 @@ export default function DepositsView({
             </button>
           </div>
           <div className="deposit-results-summary mobile-results-summary" role="status" aria-live="polite">
-            <strong>{filteredDeposits.length}</strong>
-            <span>{filteredDeposits.length === 1 ? 'record shown' : 'records shown'}</span>
+            <strong>{viewFilteredDeposits.length}</strong>
+            <span>{viewFilteredDeposits.length === 1 ? 'deposit shown' : 'deposits shown'}</span>
           </div>
           {isMobileFiltersOpen && (
             <div className="mobile-filter-fields">
@@ -339,6 +779,26 @@ export default function DepositsView({
                   onChange={(event) => setSearchText(event.target.value)}
                   placeholder="me, wife, SCSS, SBI, maturity:fd-2..."
                 />
+              </label>
+
+              <label className="field">
+                <span>Owner</span>
+                <select value={ownerFilter} onChange={(event) => setOwnerFilter(event.target.value)}>
+                  <option value="all">All owners</option>
+                  {ownerOptions.map((owner) => (
+                    <option key={owner} value={owner}>{owner}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field">
+                <span>Investment type</span>
+                <select value={investmentTypeFilter} onChange={(event) => setInvestmentTypeFilter(event.target.value)}>
+                  <option value="all">All types</option>
+                  {investmentTypeOptions.map((type) => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
               </label>
 
               {dateRangeFilters}
@@ -378,6 +838,29 @@ export default function DepositsView({
             />
           </label>
 
+          <div className="deposit-filter-grid">
+            <label className="field">
+              <span>Owner</span>
+              <select value={ownerFilter} onChange={(event) => setOwnerFilter(event.target.value)}>
+                <option value="all">All owners</option>
+                {ownerOptions.map((owner) => (
+                  <option key={owner} value={owner}>{owner}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field">
+              <span>Investment type</span>
+              <select value={investmentTypeFilter} onChange={(event) => setInvestmentTypeFilter(event.target.value)}>
+                <option value="all">All types</option>
+                {investmentTypeOptions.map((type) => (
+                  <option key={type} value={type}>{type}</option>
+                ))}
+              </select>
+            </label>
+
+          </div>
+
           {dateRangeFilters}
 
           <label className="checkbox-row">
@@ -390,24 +873,77 @@ export default function DepositsView({
           </label>
 
           <div className="deposit-results-summary" role="status" aria-live="polite">
-            <strong>{filteredDeposits.length}</strong>
-            <span>{filteredDeposits.length === 1 ? 'record shown' : 'records shown'}</span>
+            <strong>{viewFilteredDeposits.length}</strong>
+            <span>{viewFilteredDeposits.length === 1 ? 'deposit shown' : 'deposits shown'}</span>
           </div>
         </>
       )}
 
-      <div className="list">
-        {filteredDeposits.map((deposit) => (
-          <button
-            key={deposit.id}
-            type="button"
-            className={selectedId === deposit.id ? 'deposit-card selected clickable-surface' : 'deposit-card clickable-surface'}
-            onClick={() => openDepositDetail(deposit.id)}
-          >
-            {renderDepositCard(deposit)}
-          </button>
-        ))}
-      </div>
+      <section className="deposit-group-panel">
+        <div className="section-head section-head-split">
+          <div>
+            <h3>Deposits by status</h3>
+            <p>Open the bucket you want to work on next.</p>
+          </div>
+          {groupedDeposits.length > 5 ? (
+            <button
+              type="button"
+              className="secondary-btn compact ghost-btn"
+              onClick={() => setShowAllDepositGroups((current) => !current)}
+            >
+              {showAllDepositGroups ? 'Show top 5 in each section' : 'View more groups'}
+            </button>
+          ) : null}
+        </div>
+        <div className="deposit-status-stack">
+          {statusGroupedDeposits.map((section) => {
+            const isExpanded = Boolean(expandedStatusSections[section.key])
+            const visibleGroups = showAllDepositGroups ? section.groups : section.groups.slice(0, 5)
+
+            return (
+              <article key={section.key} className="deposit-status-card">
+                <button
+                  type="button"
+                  className="deposit-status-header"
+                  onClick={() => toggleStatusSection(section.key)}
+                >
+                  <div className="deposit-status-copy">
+                    <strong>{section.title}</strong>
+                    <span>{section.description}</span>
+                  </div>
+                  <div className="deposit-status-meta">
+                    <strong>{section.groups.length}</strong>
+                    <span>{section.groups.length === 1 ? 'group' : 'groups'}</span>
+                  </div>
+                </button>
+
+                {!isExpanded && section.groups.length > 0 ? (
+                  <div className="deposit-status-preview-list">
+                    {section.groups.slice(0, 2).map((group) => renderStatusBucketPreview(group, section.key))}
+                  </div>
+                ) : null}
+
+                {isExpanded ? (
+                  <div className="deposit-group-list">
+                    {visibleGroups.map((group) => renderDepositGroupCard(group, section.key))}
+                    {visibleGroups.length === 0 ? (
+                      <div className="empty-state-card">
+                        <div className="empty-state-icon" aria-hidden="true">?</div>
+                        <p className="lineage-empty">No deposits match this status right now.</p>
+                      </div>
+                    ) : null}
+                    {!showAllDepositGroups && section.groups.length > visibleGroups.length ? (
+                      <p className="timeline-preview-more">
+                        View {section.groups.length - visibleGroups.length} more groups
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+              </article>
+            )
+          })}
+        </div>
+      </section>
     </article>
   )
 
@@ -467,6 +1003,54 @@ export default function DepositsView({
                 )}
               </div>
             )}
+          </div>
+          <div className="deposit-detail-summary">
+            <div className="deposit-detail-hero">
+              <strong>{formatCurrency(selectedDeposit.principalAmount)}</strong>
+              <span>
+                {selectedDeposit.holderName} • {selectedDeposit.instrumentType} • {selectedDeposit.status}
+              </span>
+            </div>
+            <div className="detail-grid detail-grid-compact">
+              <div><span>Next maturity</span><strong>{formatDate(selectedDeposit.maturityDate)}</strong></div>
+              <div><span>Payout schedule</span><strong>{getPayoutModeLabel(selectedDeposit)}</strong></div>
+              <div><span>Interest calc</span><strong>{getCalculationFrequencyLabel(selectedDeposit.calculationFrequency)}</strong></div>
+              <div><span>Interest rate</span><strong>{formatInterestRate(selectedDeposit.interestRate)}</strong></div>
+            </div>
+          </div>
+          {nextActionConfig ? (
+            <div className="deposit-next-action-card">
+              <div>
+                <span>Next action</span>
+                <strong>{nextActionConfig.title}</strong>
+                <p>{nextActionConfig.detail}</p>
+              </div>
+              {nextActionConfig.ctaLabel && nextActionConfig.onClick ? (
+                <button type="button" className="primary-btn compact-btn" onClick={nextActionConfig.onClick}>
+                  {nextActionConfig.ctaLabel}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+          <div className="interest-summary-grid">
+            <div className="interest-summary-card">
+              <span>Cash received</span>
+              <strong>{formatCurrency(cashStatusSummary?.received)}</strong>
+            </div>
+            <div className="interest-summary-card">
+              <span>Reinvested</span>
+              <strong>{formatCurrency(cashStatusSummary?.reinvested)}</strong>
+            </div>
+            <div className="interest-summary-card">
+              <span>Expected</span>
+              <strong>{formatCurrency(cashStatusSummary?.expected)}</strong>
+            </div>
+            <div className="interest-summary-card">
+              <span>Available now</span>
+              <strong className={Number(cashStatusSummary?.availableNow || 0) > 0 ? 'amount-warning' : 'amount-ok'}>
+                {formatCurrency(cashStatusSummary?.availableNow)}
+              </strong>
+            </div>
           </div>
           {!isReadOnly && archiveTargetId === selectedDeposit.id && (
             <div className="inline-action-card">
@@ -726,6 +1310,51 @@ export default function DepositsView({
                 )}
                 <p><strong>Notes:</strong> {selectedDeposit.notes || 'No notes yet.'}</p>
               </div>
+
+              <section className="deposit-timeline-panel">
+                <div className="section-head section-head-split">
+                  <div>
+                    <h3>Timeline</h3>
+                    <p>Open an item to see full cashflow detail.</p>
+                  </div>
+                </div>
+                <div className="deposit-timeline-list">
+                  {detailTimelineItems.map((item) => {
+                    const isExpanded = Boolean(expandedTimelineItems[item.key])
+
+                    return (
+                      <article key={item.key} className="deposit-timeline-card">
+                        <button
+                          type="button"
+                          className="deposit-timeline-toggle"
+                          onClick={() => toggleTimelineItem(item.key)}
+                        >
+                          <div>
+                            <strong>{item.kind}</strong>
+                            <span>{formatDate(item.date)} • {item.status}</span>
+                          </div>
+                          <div className="deposit-timeline-amount">
+                            <strong>{formatCurrency(item.amount)}</strong>
+                            <span>{isExpanded ? 'Hide details' : 'Show details'}</span>
+                          </div>
+                        </button>
+                        {isExpanded ? (
+                          <div className="deposit-timeline-body">
+                            <p>{item.detail}</p>
+                            {item.canAllocate && item.onAllocate ? (
+                              <div className="schedule-actions">
+                                <button type="button" className="secondary-btn compact" onClick={item.onAllocate}>
+                                  Reinvest / allocate
+                                </button>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </article>
+                    )
+                  })}
+                </div>
+              </section>
 
               <div className="allocation-card">
                 <p className="allocation-title">Maturity usage</p>
