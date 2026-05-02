@@ -120,6 +120,101 @@ function PrivacyPolicyView({ themeClass }) {
   )
 }
 
+function TermsOfServiceView({ themeClass }) {
+  return (
+    <div className={`shell ${themeClass}`}>
+      <section className="privacy-shell">
+        <article className="panel privacy-card">
+          <div className="privacy-head">
+            <p className="eyebrow">YieldFlow</p>
+            <h1>Terms of Service</h1>
+            <p className="privacy-updated">Last updated: 03 May 2026</p>
+          </div>
+
+          <div className="privacy-body">
+            <section className="privacy-section">
+              <h2>Use of YieldFlow</h2>
+              <p>
+                YieldFlow is a financial lifecycle management application designed to help users
+                track deposits, interest receipts, maturity cash, reinvestment activity, and
+                portfolio backups. By using the service, you agree to use it only for lawful and
+                authorized purposes.
+              </p>
+            </section>
+
+            <section className="privacy-section">
+              <h2>User responsibility</h2>
+              <p>
+                You are responsible for the accuracy of the financial data you enter into YieldFlow,
+                including investment details, maturity values, payout values, tax-related inputs,
+                and backup files restored into the application.
+              </p>
+            </section>
+
+            <section className="privacy-section">
+              <h2>No financial advice</h2>
+              <p>
+                YieldFlow is a tracking and management tool. It does not provide financial,
+                investment, tax, or legal advice. Any planning, summaries, or estimates shown in
+                the application should be reviewed independently before making financial decisions.
+              </p>
+            </section>
+
+            <section className="privacy-section">
+              <h2>Google services</h2>
+              <p>
+                If you use Google sign-in or Google Drive backup features, you agree to the
+                permissions requested for those features. Google Drive access is used only for the
+                backup workflow you explicitly initiate.
+              </p>
+            </section>
+
+            <section className="privacy-section">
+              <h2>Availability and changes</h2>
+              <p>
+                Features, data formats, and workflows may evolve over time. Backup and restore
+                should be used as a safety mechanism, but users should maintain appropriate care for
+                their own records and validation processes.
+              </p>
+            </section>
+
+            <section className="privacy-section">
+              <h2>Limitation of responsibility</h2>
+              <p>
+                YieldFlow is provided as a financial record management tool. To the extent permitted
+                by law, the service is provided without guarantees of uninterrupted operation or
+                suitability for every institution-specific financial product rule.
+              </p>
+            </section>
+
+            <section className="privacy-section">
+              <h2>Contact</h2>
+              <p>
+                For questions about these terms, contact Parth Dave at{' '}
+                <a href="mailto:parthdave.1984@gmail.com">parthdave.1984@gmail.com</a>.
+              </p>
+            </section>
+          </div>
+
+          <div className="privacy-footer">
+            <a className="secondary-btn compact" href={APP_HOME_URL}>
+              Back to YieldFlow
+            </a>
+            <a
+              className="secondary-btn compact ghost-btn"
+              href={AUTHOR_LINKEDIN_URL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              View LinkedIn
+            </a>
+          </div>
+        </article>
+      </section>
+    </div>
+  )
+}
+
 const normalizeSessionState = (sessionResponse = {}) => ({
   authenticated: Boolean(sessionResponse.authenticated),
   user: sessionResponse.user || null,
@@ -2248,6 +2343,10 @@ function App() {
 
   if (currentPathname === '/privacy') {
     return <PrivacyPolicyView themeClass={themeClass} />
+  }
+
+  if (currentPathname === '/terms') {
+    return <TermsOfServiceView themeClass={themeClass} />
   }
 
   if (!sessionState.authenticated) {
