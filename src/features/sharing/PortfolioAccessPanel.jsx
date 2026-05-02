@@ -11,14 +11,14 @@ export default function PortfolioAccessPanel({
   shareFeedback,
 }) {
   return (
-    <article className="panel">
+    <section className="settings-section settings-section-accent">
       <div className="section-head">
         <div>
-          <h2>{isOwnerPortfolio ? 'Portfolio access' : 'Shared access'}</h2>
+          <h2>{isOwnerPortfolio ? 'Access' : 'Shared access'}</h2>
           <p>
             {isOwnerPortfolio
-              ? `Grant read-only access to ${activePortfolioLabel}.`
-              : `You are currently viewing ${activePortfolioLabel} in read-only mode.`}
+              ? `Control who can view ${activePortfolioLabel} and what they are allowed to do.`
+              : `You are viewing ${activePortfolioLabel} with limited access.`}
           </p>
         </div>
       </div>
@@ -31,9 +31,16 @@ export default function PortfolioAccessPanel({
 
       {isOwnerPortfolio ? (
         <>
+          <div className="share-permission-note">
+            <strong>Invited users can</strong>
+            <p>View deposits, cashflows, timelines, and FY interest summaries.</p>
+            <strong>They cannot</strong>
+            <p>Edit deposits, change masters, archive records, or use admin actions.</p>
+          </div>
+
           <form className="share-form" onSubmit={onCreateShare}>
             <label className="field">
-              <span>Share with Google email</span>
+              <span>Invite with Google email</span>
               <input
                 type="email"
                 value={shareEmail}
@@ -41,9 +48,12 @@ export default function PortfolioAccessPanel({
                 placeholder="person@example.com"
                 autoComplete="off"
               />
+              <small className="field-help">
+                Access is read-only. The invited user will see this portfolio in their portfolio switcher.
+              </small>
             </label>
             <button type="submit" className="primary-btn" disabled={isSubmittingShare}>
-              {isSubmittingShare ? 'Sharing...' : 'Grant read-only access'}
+              {isSubmittingShare ? 'Sending invite...' : 'Invite viewer'}
             </button>
           </form>
 
@@ -51,7 +61,7 @@ export default function PortfolioAccessPanel({
             <div className="section-head">
               <div>
                 <h2>People with access</h2>
-                <p>These people can view this portfolio but cannot change deposits or masters.</p>
+                <p>These people can review the portfolio but cannot make changes.</p>
               </div>
             </div>
 
@@ -72,15 +82,21 @@ export default function PortfolioAccessPanel({
                 </div>
               ))
             ) : (
-              <p className="lineage-empty">No guest access has been granted yet.</p>
+              <div className="empty-state-card masters-empty-state">
+                <div className="empty-state-icon masters-empty-icon" aria-hidden="true">A</div>
+                <p className="lineage-empty">No viewers added yet.</p>
+                <p className="masters-empty-copy">
+                  Invite a family member or advisor when you want them to review this portfolio without editing it.
+                </p>
+              </div>
             )}
           </div>
         </>
       ) : (
         <div className="share-list">
           <p className="inline-warning">
-            This portfolio is shared with you. Editing, archiving, admin export, and master-data
-            changes are disabled.
+            You can review deposits, maturities, payouts, and FY summaries here. Editing, archiving,
+            admin export, and master-data changes are disabled.
           </p>
         </div>
       )}
@@ -90,7 +106,7 @@ export default function PortfolioAccessPanel({
           <div className="section-head">
             <div>
               <h2>Shared with you</h2>
-              <p>Switch portfolios from Settings to review these shared investment books.</p>
+              <p>Use the portfolio selector in Settings to switch into one of these shared books.</p>
             </div>
           </div>
 
@@ -105,6 +121,6 @@ export default function PortfolioAccessPanel({
           ))}
         </div>
       )}
-    </article>
+    </section>
   )
 }

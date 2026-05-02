@@ -13,6 +13,7 @@ import { buildOwnerAliasLookup, emptyMasterData, normalizeMasterData } from '../
 
 const ADD_NEW_MASTER_VALUE = '__add_new_master__'
 const THEME_STORAGE_KEY = 'yieldflow.theme'
+const AUTHOR_LINKEDIN_URL = 'https://www.linkedin.com/in/parthdave2'
 const createEmptySessionState = () => ({
   authenticated: false,
   user: null,
@@ -148,6 +149,7 @@ function App() {
     () => globalThis.localStorage?.getItem(THEME_STORAGE_KEY) || 'theme-midnight-navy',
   )
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [isAboutOpen, setIsAboutOpen] = useState(false)
   const [activePortfolioOwnerId, setActivePortfolioOwnerId] = useState('')
   const [sharesState, setSharesState] = useState({ ownerShares: [], sharedWithMe: [] })
   const [shareEmail, setShareEmail] = useState('')
@@ -2228,7 +2230,7 @@ function App() {
           <div className="section-head">
             <div>
               <h2>Settings</h2>
-              <p>Manage portfolio, theme, and access preferences.</p>
+              <p>Manage access, portfolio ownership, and personal preferences.</p>
             </div>
             <button
               type="button"
@@ -2239,97 +2241,151 @@ function App() {
             </button>
           </div>
 
-          <div className="settings-profile">
-            {sessionState.user?.photoUrl && sessionState.user.photoUrl !== brokenAvatarUrl ? (
-              <img
-                className="settings-avatar"
-                src={sessionState.user.photoUrl}
-                alt={sessionState.user.displayName}
-                referrerPolicy="no-referrer"
-                onError={() => setBrokenAvatarUrl(sessionState.user?.photoUrl || '__unknown__')}
-              />
-            ) : (
-              <div className="settings-avatar fallback-avatar" aria-hidden="true">
-                {String(sessionState.user?.displayName || sessionState.user?.email || 'Y')
-                  .trim()
-                  .slice(0, 1)
-                  .toUpperCase()}
-              </div>
-            )}
-            <div className="settings-profile-copy">
-              <strong>{sessionState.user?.displayName}</strong>
-              <span>{sessionState.user?.email}</span>
+          <section className="settings-section settings-section-subtle settings-about-section">
+            <div className="settings-about-copy">
+              <span className="settings-about-eyebrow">YieldFlow</span>
+              <strong>Built by Parth Dave</strong>
+              <p>Technology Leader • Banking &amp; Financial Systems</p>
             </div>
-          </div>
-
-          <div className="settings-grid">
-            <div className="field settings-static-field">
-              <span>Role</span>
-              <strong>{isAdminUser ? 'Admin' : 'User'}</strong>
-            </div>
-
-            <label className="field">
-              <span>Viewing portfolio</span>
-              <select
-                value={activePortfolioOwnerId}
-                onChange={(event) => setActivePortfolioOwnerId(event.target.value)}
+            <div className="settings-about-actions">
+              <a
+                className="secondary-btn compact ghost-btn"
+                href={AUTHOR_LINKEDIN_URL}
+                target="_blank"
+                rel="noreferrer"
               >
-                {sessionState.accessiblePortfolios.map((portfolio) => (
-                  <option key={portfolio.ownerUserId} value={portfolio.ownerUserId}>
-                    {portfolio.accessType === 'owner'
-                      ? 'My portfolio'
-                      : `${portfolio.ownerDisplayName}${portfolio.accessType === 'admin' ? '' : ' (Shared)'}`}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="field">
-              <span>Theme</span>
-              <select value={themeClass} onChange={(event) => setThemeClass(event.target.value)}>
-                <option value="theme-midnight-navy">Midnight Navy</option>
-                <option value="theme-cream">Cream</option>
-              </select>
-            </label>
-          </div>
-
-          {!isAdminUser && (
-            <PortfolioAccessPanel
-              isOwnerPortfolio={!isReadOnlyPortfolio}
-              activePortfolioLabel={activePortfolioLabel}
-              shareEmail={shareEmail}
-              setShareEmail={setShareEmail}
-              onCreateShare={handleCreateShare}
-              onDeleteShare={handleDeleteShare}
-              ownedShares={sharesState.ownerShares}
-              sharedWithMe={sharesState.sharedWithMe}
-              isSubmittingShare={isSubmittingShare}
-              shareFeedback={shareFeedback}
-            />
-          )}
-
-          <div className="settings-actions">
-            {canUseAdmin && (
-              <button type="button" className="secondary-btn compact" onClick={openAdmin}>
-                Open Admin
-              </button>
-            )}
-            {canEditPortfolio && (
+                View LinkedIn
+              </a>
               <button
                 type="button"
-                className="secondary-btn compact"
-                onClick={() => {
-                  setActiveTab('masters')
-                  setIsSettingsOpen(false)
-                }}
+                className="help-trigger settings-about-trigger"
+                onClick={() => setIsAboutOpen(true)}
+                aria-label="About YieldFlow"
               >
-                Open Masters
+                ℹ
               </button>
-            )}
-            <button type="button" className="secondary-btn compact" onClick={handleLogout}>
-              Logout
-            </button>
-          </div>
+            </div>
+          </section>
+
+          <PortfolioAccessPanel
+            isOwnerPortfolio={!isReadOnlyPortfolio}
+            activePortfolioLabel={activePortfolioLabel}
+            shareEmail={shareEmail}
+            setShareEmail={setShareEmail}
+            onCreateShare={handleCreateShare}
+            onDeleteShare={handleDeleteShare}
+            ownedShares={sharesState.ownerShares}
+            sharedWithMe={sharesState.sharedWithMe}
+            isSubmittingShare={isSubmittingShare}
+            shareFeedback={shareFeedback}
+          />
+
+          <section className="settings-section">
+            <div className="section-head">
+              <div>
+                <h2>Profile</h2>
+                <p>Your identity and the portfolio you are currently viewing.</p>
+              </div>
+            </div>
+
+            <div className="settings-profile">
+              {sessionState.user?.photoUrl && sessionState.user.photoUrl !== brokenAvatarUrl ? (
+                <img
+                  className="settings-avatar"
+                  src={sessionState.user.photoUrl}
+                  alt={sessionState.user.displayName}
+                  referrerPolicy="no-referrer"
+                  onError={() => setBrokenAvatarUrl(sessionState.user?.photoUrl || '__unknown__')}
+                />
+              ) : (
+                <div className="settings-avatar fallback-avatar" aria-hidden="true">
+                  {String(sessionState.user?.displayName || sessionState.user?.email || 'Y')
+                    .trim()
+                    .slice(0, 1)
+                    .toUpperCase()}
+                </div>
+              )}
+              <div className="settings-profile-copy">
+                <strong>{sessionState.user?.displayName}</strong>
+                <span>{sessionState.user?.email}</span>
+              </div>
+            </div>
+
+            <div className="settings-grid">
+              <div className="field settings-static-field">
+                <span>Role</span>
+                <strong>{isAdminUser ? 'Admin' : 'User'}</strong>
+              </div>
+
+              <label className="field">
+                <span>Viewing portfolio</span>
+                <select
+                  value={activePortfolioOwnerId}
+                  onChange={(event) => setActivePortfolioOwnerId(event.target.value)}
+                >
+                  {sessionState.accessiblePortfolios.map((portfolio) => (
+                    <option key={portfolio.ownerUserId} value={portfolio.ownerUserId}>
+                      {portfolio.accessType === 'owner'
+                        ? 'My portfolio'
+                        : `${portfolio.ownerDisplayName}${portfolio.accessType === 'admin' ? '' : ' (Shared)'}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </section>
+
+          <section className="settings-section settings-section-subtle">
+            <div className="section-head">
+              <div>
+                <h2>Preferences</h2>
+                <p>Personal display choices for your own session.</p>
+              </div>
+            </div>
+
+            <div className="settings-grid settings-grid-compact">
+              <label className="field">
+                <span>Theme</span>
+                <select value={themeClass} onChange={(event) => setThemeClass(event.target.value)}>
+                  <option value="theme-midnight-navy">Midnight Navy</option>
+                  <option value="theme-professional">Professional</option>
+                  <option value="theme-cream">Cream</option>
+                </select>
+              </label>
+            </div>
+          </section>
+
+          <section className="settings-section settings-section-subtle">
+            <div className="section-head">
+              <div>
+                <h2>Advanced settings</h2>
+                <p>Reference data and admin utilities.</p>
+              </div>
+            </div>
+
+            <div className="settings-actions">
+              {canUseAdmin && (
+                <button type="button" className="secondary-btn compact" onClick={openAdmin}>
+                  Open Admin
+                </button>
+              )}
+              {canEditPortfolio && (
+                <button
+                  type="button"
+                  className="secondary-btn compact"
+                  onClick={() => {
+                    setActiveTab('masters')
+                    setIsSettingsOpen(false)
+                  }}
+                >
+                  Open Masters
+                </button>
+              )}
+              <button type="button" className="secondary-btn compact" onClick={handleLogout}>
+                Logout
+              </button>
+            </div>
+          </section>
         </section>
       )}
 
@@ -2999,6 +3055,59 @@ function App() {
           portfolioLabel={activePortfolioLabel}
           isDownloadingWorkbook={isDownloadingWorkbook}
         />
+        </div>
+      )}
+
+      <footer className="app-footer-signature">
+        <span>Built by Parth Dave</span>
+        <span aria-hidden="true">•</span>
+        <a href={AUTHOR_LINKEDIN_URL} target="_blank" rel="noreferrer">
+          LinkedIn
+        </a>
+      </footer>
+
+      {isAboutOpen && (
+        <div
+          className="about-modal-backdrop"
+          role="presentation"
+          onClick={() => setIsAboutOpen(false)}
+        >
+          <section
+            className="about-modal panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="about-yieldflow-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="section-head">
+              <div>
+                <h2 id="about-yieldflow-title">About YieldFlow</h2>
+                <p>A financial lifecycle management tool focused on cashflow visibility, interest tracking, and reinvestment decisions.</p>
+              </div>
+              <button
+                type="button"
+                className="secondary-btn compact ghost-btn"
+                onClick={() => setIsAboutOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="about-modal-copy">
+              <div className="about-modal-signature">
+                <strong>Built by Parth Dave</strong>
+                <span>Technology Leader • Banking &amp; Financial Systems</span>
+              </div>
+              <a
+                className="secondary-btn compact ghost-btn"
+                href={AUTHOR_LINKEDIN_URL}
+                target="_blank"
+                rel="noreferrer"
+              >
+                View LinkedIn
+              </a>
+            </div>
+          </section>
         </div>
       )}
     </div>
