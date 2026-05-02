@@ -2399,6 +2399,12 @@ function App() {
               isOpen={isTaxViewOpen}
               onOpen={() => setIsTaxViewOpen(true)}
               onClose={() => setIsTaxViewOpen(false)}
+              onOpenInvestmentDetail={(investment) =>
+                openDepositDrilldown(
+                  investment.investmentId,
+                  investment.accountNumber || investment.investmentId,
+                )
+              }
             />
 
             <article id="dashboard-maturity-section" className="panel">

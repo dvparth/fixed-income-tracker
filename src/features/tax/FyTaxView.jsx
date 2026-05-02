@@ -146,6 +146,7 @@ export default function FyTaxView({
   isOpen,
   onOpen,
   onClose,
+  onOpenInvestmentDetail,
 }) {
   const [expandedInstitutionKeys, setExpandedInstitutionKeys] = useState({})
 
@@ -166,6 +167,15 @@ export default function FyTaxView({
       ...current,
       [key]: !current[key],
     }))
+  }
+
+  const handleInvestmentCardKeyDown = (event, investment) => {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return
+    }
+
+    event.preventDefault()
+    onOpenInvestmentDetail?.(investment)
   }
 
   const logInstitutionInvestmentDetails = (ownerSummary, institution) => {
@@ -358,13 +368,20 @@ export default function FyTaxView({
                           {institution.investmentBreakdown.map((investment) => (
                             <article
                               key={investment.investmentId || `${investment.ownerId}-${investment.accountNumber}-${investment.valueDate}`}
-                              className="tax-breakdown-card"
+                              className={`tax-breakdown-card ${investment.investmentId ? 'clickable-surface tax-breakdown-card-action' : ''}`}
+                              role={investment.investmentId ? 'button' : undefined}
+                              tabIndex={investment.investmentId ? 0 : undefined}
+                              onClick={investment.investmentId ? () => onOpenInvestmentDetail?.(investment) : undefined}
+                              onKeyDown={investment.investmentId ? (event) => handleInvestmentCardKeyDown(event, investment) : undefined}
                             >
                               <div className="tax-breakdown-head">
                                 <div>
                                   <strong>{investment.accountNumber || 'No account no.'}</strong>
                                   <p>{investment.investmentType || 'Investment'} | {investment.valueDate} to {investment.maturityDate}</p>
                                 </div>
+                                <span className={`pill ${String(investment.status || '').trim().toUpperCase() === 'CLOSED' ? 'closed' : 'open'}`}>
+                                  {investment.status || 'Open'}
+                                </span>
                               </div>
                               <div className="tax-breakdown-grid">
                                 <p><span>Principal</span><strong>{formatCurrency(investment.principal)}</strong></p>

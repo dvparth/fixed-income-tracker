@@ -30,6 +30,45 @@ test('Quarterly calculation + quarterly payout stays non-compounding', () => {
   assert.equal(normalized.calculationFrequency, 'SIMPLE')
 })
 
+test('Quarterly payout products use simple daily interest on original principal', () => {
+  const principal = 1500000
+  const annualRate = 0.0725
+  const valueDate = '2025-04-01'
+  const maturityDate = '2026-03-31'
+
+  const breakdown = estimateInvestmentTaxView(
+    {
+      principal,
+      annualRate,
+      valueDate,
+      maturityDate,
+      interestCalculationFrequency: 'Quarterly',
+      interestPayoutFrequency: 'Quarterly',
+      institutionName: 'Quarterly Payout FD',
+      investmentType: 'SCSS',
+    },
+    parseFinancialYearLabel('2025-26'),
+    {
+      ownerId: 'owner-1',
+      ownerName: 'Owner',
+      ownerType: 'Individual',
+      ownerTaxSlab: 0.3,
+      hasConfiguredTaxProfile: true,
+    },
+  )
+
+  const daysInFy = 365
+  const expectedSimpleInterest = Math.round(principal * annualRate * daysInFy / 365)
+
+  assert.equal(breakdown.payoutFrequency, 'QUARTERLY')
+  assert.equal(breakdown.calculationFrequency, 'SIMPLE')
+  assert.equal(
+    breakdown.estimatedTaxableInterest,
+    expectedSimpleInterest,
+    `Expected simple FY interest ${expectedSimpleInterest}, received ${breakdown.estimatedTaxableInterest}`,
+  )
+})
+
 test('Simple + At maturity compounds for row-19 style case', () => {
   const breakdown = estimateInvestmentTaxView(
     {

@@ -664,6 +664,26 @@
   gap: 12px;
 }
 
+.tax-breakdown-card-action {
+  cursor: pointer;
+  transition:
+    transform 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.tax-breakdown-card-action:hover,
+.tax-breakdown-card-action:focus-visible {
+  transform: translateY(-1px);
+  border-color: var(--border-accent);
+  box-shadow: 0 14px 28px color-mix(in srgb, var(--shadow-color) 115%, transparent);
+}
+
+.tax-breakdown-card-action.clickable-surface::after {
+  top: 18px;
+  transform: none;
+}
+
 .tax-breakdown-tags {
   display: flex;
   gap: 8px;

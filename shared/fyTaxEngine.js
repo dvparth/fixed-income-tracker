@@ -341,7 +341,10 @@ const buildDailyAccrualTimeline = (investment, selectedFinancialYear = null) => 
 
   while (cursor.getTime() <= maturityDate.getTime()) {
     const dayKey = toYmd(cursor)
-    const interestForDay = currentPrincipal * dailyRate
+    const interestBasePrincipal = normalizedConfig.compoundingEnabled
+      ? currentPrincipal
+      : originalPrincipal
+    const interestForDay = interestBasePrincipal * dailyRate
     const financialYear = getFinancialYearLabelFromDate(cursor)
     const nextDay = addDays(cursor, 1)
     const boundaryKey = toYmd(nextDay)
@@ -357,7 +360,9 @@ const buildDailyAccrualTimeline = (investment, selectedFinancialYear = null) => 
     }
 
     accumulatedInterestSinceLastPayout += interestForDay
-    accumulatedInterestSinceLastCompounding += interestForDay
+    if (normalizedConfig.compoundingEnabled) {
+      accumulatedInterestSinceLastCompounding += interestForDay
+    }
 
     if (compoundingDates.has(dayKey) && normalizedConfig.compoundingEnabled) {
       currentPrincipal += accumulatedInterestSinceLastCompounding
@@ -481,6 +486,7 @@ const createZeroBreakdown = ({
   hasConfiguredTaxProfile: profile.hasConfiguredTaxProfile,
   investmentId: String(investment.id || ''),
   accountNumber: String(investment.accountNumber || '').trim(),
+  status: String(investment.status || '').trim() || 'Open',
   financialYearBreakdown: [],
 })
 
@@ -577,6 +583,7 @@ export const estimateInvestmentTaxView = (investment, selectedFY, ownerTaxProfil
     hasConfiguredTaxProfile: profile.hasConfiguredTaxProfile,
     investmentId: String(investment.id || ''),
     accountNumber: String(investment.accountNumber || '').trim(),
+    status: String(investment.status || '').trim() || 'Open',
     financialYearBreakdown: timeline.accrualByFinancialYear,
   }
 }
@@ -599,6 +606,18 @@ const addBreakdownToTotals = (totals, breakdown) => ({
   totalEstimatedTds: totals.totalEstimatedTds + breakdown.estimatedTds,
   totalEstimatedAdditionalTaxLiability:
     totals.totalEstimatedAdditionalTaxLiability + breakdown.estimatedAdditionalTaxLiability,
+})
+
+const addSummaryToTotals = (totals, summary) => ({
+  totalEstimatedInterestPaid:
+    totals.totalEstimatedInterestPaid + summary.totalEstimatedInterestPaid,
+  totalEstimatedInterestAccrued:
+    totals.totalEstimatedInterestAccrued + summary.totalEstimatedInterestAccrued,
+  totalEstimatedTaxableInterest:
+    totals.totalEstimatedTaxableInterest + summary.totalEstimatedTaxableInterest,
+  totalEstimatedTds: totals.totalEstimatedTds + summary.totalEstimatedTds,
+  totalEstimatedAdditionalTaxLiability:
+    totals.totalEstimatedAdditionalTaxLiability + summary.totalEstimatedAdditionalTaxLiability,
 })
 
 export const generateOwnerWiseFYTaxSummary = (investmentList = [], selectedFY, ownerProfiles = []) => {
@@ -645,7 +664,7 @@ export const generateOwnerWiseFYTaxSummary = (investmentList = [], selectedFY, o
     .sort((left, right) => right.totalEstimatedTaxableInterest - left.totalEstimatedTaxableInterest)
 
   const consolidatedPortfolioSummary = ownerWiseSummary.reduce(
-    (totals, ownerSummary) => addBreakdownToTotals(totals, ownerSummary),
+    (totals, ownerSummary) => addSummaryToTotals(totals, ownerSummary),
     {
       ownerCount: ownerWiseSummary.length,
       investmentCount: ownerWiseSummary.reduce(
