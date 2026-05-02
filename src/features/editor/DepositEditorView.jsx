@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react'
 const getBehaviorMode = (payoutMode) => (payoutMode === 'on-maturity' ? 'cumulative' : 'payout')
 
 const getProductBehaviorLabel = (payoutMode) =>
-  payoutMode === 'on-maturity' ? 'Cumulative' : 'Payout'
+  payoutMode === 'on-maturity' ? 'Cumulative' : 'Interest payout'
 
 const getCompoundingFrequencyLabel = (value) => {
   const normalized = String(value || '').trim().toUpperCase()
@@ -218,7 +218,7 @@ export default function DepositEditorView({
               <small>{formValues.holderName || 'Choose holder'}</small>
             </div>
             <div className="editor-summary-card">
-              <span>{behaviorMode === 'cumulative' ? 'Maturity capture' : 'Payout capture'}</span>
+              <span>{behaviorMode === 'cumulative' ? 'Maturity capture' : 'Interest payout capture'}</span>
               <strong>
                 {behaviorMode === 'cumulative' ? 'Enter maturity values' : 'Enter payout values'}
               </strong>
@@ -356,7 +356,7 @@ export default function DepositEditorView({
                 }
                 onClick={() => applyBehaviorMode('payout')}
               >
-                <strong>Payout</strong>
+                <strong>Interest payout</strong>
                 <span>
                   Preset periodic payouts. Use the fields below if the product still compounds
                   internally.
@@ -681,7 +681,7 @@ export default function DepositEditorView({
                         <strong>{sourceEvent?.bankName || entry.eventId}</strong>
                         <span>
                           {sourceEvent
-                            ? `${sourceEvent.accountNumber || 'No account no.'} | ${
+                            ? `${sourceEvent.accountNumber || 'No account number'} | ${
                                 sourceEvent.type === 'Interest' ? 'Interest' : 'Maturity'
                               } | ${formatDate(sourceEvent.date)}`
                             : entry.eventId}
@@ -767,7 +767,7 @@ export default function DepositEditorView({
                 )}
               </label>
               <label className="field">
-                <span>Sr. No</span>
+                <span>Serial number</span>
                 <input name="srNo" value={formValues.srNo} readOnly autoComplete="off" />
               </label>
               <label className="field">

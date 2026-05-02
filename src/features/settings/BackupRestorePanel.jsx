@@ -312,7 +312,7 @@ export default function BackupRestorePanel({
       setFeedback({
         type: result.hasErrors ? 'error' : 'success',
         message: result.hasErrors
-          ? 'This backup needs fixes before it can be restored.'
+          ? 'Some issues need to be fixed before this backup can be restored.'
           : 'Backup ready for review.',
       })
     } catch (error) {

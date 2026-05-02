@@ -1,4 +1,4 @@
-import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import AdminView from './features/admin/AdminView.jsx'
 import AuthView from './features/auth/AuthView.jsx'
@@ -403,6 +403,7 @@ function App() {
   const [mastersViewSeed, setMastersViewSeed] = useState(0)
   const [mastersReturnTarget, setMastersReturnTarget] = useState(null)
   const [activeHelpKey, setActiveHelpKey] = useState(null)
+  const [desktopHelpPopover, setDesktopHelpPopover] = useState(null)
   const currentFinancialYear = useMemo(() => getCurrentFinancialYearRange(TODAY), [])
   const [selectedFinancialYear, setSelectedFinancialYear] = useState(currentFinancialYear.label)
   const [isTaxViewOpen, setIsTaxViewOpen] = useState(false)
@@ -411,6 +412,8 @@ function App() {
   const [taxSummaryError, setTaxSummaryError] = useState('')
   const [selectedDashboardOwner, setSelectedDashboardOwner] = useState('')
   const userMenuRef = useRef(null)
+  const helpTriggerRefs = useRef(new Map())
+  const desktopHelpPopoverRef = useRef(null)
   const lastActivityRef = useRef(lastActivityAt)
   const activeDeposits = useMemo(
     () => deposits.filter((deposit) => !deposit.isDeleted),
@@ -2258,8 +2261,8 @@ function App() {
           isRealized,
           label:
             event.type === 'Interest'
-              ? `${event.bankName} | ${event.accountNumber || 'No account no.'} | Interest | ${formatDate(event.date)} | ${formatCurrency(availableAmount)} available`
-              : `${event.bankName} | ${event.accountNumber || 'No account no.'} | Maturity | ${formatDate(event.date)} | ${formatCurrency(availableAmount)} available`,
+              ? `${event.bankName} | ${event.accountNumber || 'No account number'} | Interest | ${formatDate(event.date)} | ${formatCurrency(availableAmount)} available`
+              : `${event.bankName} | ${event.accountNumber || 'No account number'} | Maturity | ${formatDate(event.date)} | ${formatCurrency(availableAmount)} available`,
         }
       })
       .filter((event) => event.canUse && event.isRealized)
@@ -2325,11 +2328,11 @@ function App() {
   const showFullHeroCard = false
   const showHeroStrip = visibleActiveTab === 'dashboard' && !isMobileEditorScreen
   const helpCopy = {
-    'active-principal': 'This is the total amount still invested in open deposits.',
+    'active-principal': 'This is the total amount currently invested in open deposits.',
     'interest-realised': 'This is the interest already earned in the selected financial year.',
     'unused-maturity-cash':
-      'This is maturity money already received but not yet used in a new investment.',
-    'interest-not-reused': 'This is interest already received but still sitting unused.',
+      'This is maturity cash already received and available to reinvest.',
+    'interest-not-reused': 'This is interest cash already received and available to reinvest.',
     'upcoming-interest':
       'This only shows future interest for deposits that pay interest before maturity, like quarterly or yearly payout products.',
     'maturity-section':
@@ -2338,8 +2341,8 @@ function App() {
         : 'These are the next deposits that will mature soon.',
     'interest-section':
       interestFocusMode === 'pending'
-        ? 'These are interest amounts already received but not yet fully used in new deposits.'
-        : 'These are future interest payouts expected from deposits that pay before maturity.',
+        ? 'These are interest amounts already received and still available to reinvest.'
+        : 'These are upcoming interest payouts from deposits that pay before maturity.',
   }
 
   const toggleMobileDetailSection = (sectionKey) => {
@@ -2349,18 +2352,180 @@ function App() {
     }))
   }
 
+  const buildDesktopHelpPopover = (button, text, key) => {
+    if (!button || typeof window === 'undefined') {
+      return null
+    }
+
+    const rect = button.getBoundingClientRect()
+    const popoverWidth = Math.min(240, window.innerWidth - 24)
+    const popoverHeight = 72
+    const gap = 10
+    const availableBelow = window.innerHeight - rect.bottom - 16
+    const shouldOpenBelow = availableBelow >= popoverHeight || rect.top < popoverHeight + 32
+    const left = Math.min(
+      Math.max(rect.left + rect.width / 2 - popoverWidth / 2, 12),
+      window.innerWidth - popoverWidth - 12,
+    )
+
+    return {
+      key,
+      text,
+      placement: shouldOpenBelow ? 'below' : 'above',
+      style: {
+        left: `${left}px`,
+        top: shouldOpenBelow ? `${rect.bottom + gap}px` : `${rect.top - popoverHeight - gap}px`,
+      },
+    }
+  }
+
+  const syncDesktopHelpPopover = useCallback((key, text) => {
+    if (isMobile) {
+      setDesktopHelpPopover(null)
+      return
+    }
+
+    const button = helpTriggerRefs.current.get(key)
+    setDesktopHelpPopover(buildDesktopHelpPopover(button, text, key))
+  }, [isMobile])
+
+  useEffect(() => {
+    if (!desktopHelpPopover || isMobile || !desktopHelpPopoverRef.current) {
+      return undefined
+    }
+
+    const adjustPopover = () => {
+      const popover = desktopHelpPopoverRef.current
+      if (!popover) {
+        return
+      }
+
+      const rect = popover.getBoundingClientRect()
+      const margin = 12
+      let nextLeft = rect.left
+      let nextTop = rect.top
+
+      if (rect.left < margin) {
+        nextLeft = margin
+      } else if (rect.right > window.innerWidth - margin) {
+        nextLeft = window.innerWidth - rect.width - margin
+      }
+
+      if (rect.top < margin) {
+        nextTop = margin
+      } else if (rect.bottom > window.innerHeight - margin) {
+        nextTop = window.innerHeight - rect.height - margin
+      }
+
+      const currentLeft = Number.parseFloat(desktopHelpPopover.style.left)
+      const currentTop = Number.parseFloat(desktopHelpPopover.style.top)
+      if (
+        Number.isFinite(currentLeft) &&
+        Number.isFinite(currentTop) &&
+        Math.abs(nextLeft - currentLeft) < 1 &&
+        Math.abs(nextTop - currentTop) < 1
+      ) {
+        return
+      }
+
+      setDesktopHelpPopover((current) => (
+        current
+          ? {
+              ...current,
+              style: {
+                ...current.style,
+                left: `${nextLeft}px`,
+                top: `${nextTop}px`,
+              },
+            }
+          : current
+      ))
+    }
+
+    const frameId = window.requestAnimationFrame(adjustPopover)
+    return () => window.cancelAnimationFrame(frameId)
+  }, [desktopHelpPopover, isMobile])
+
+  useEffect(() => {
+    if (!desktopHelpPopover || isMobile) {
+      return undefined
+    }
+
+    const refreshPosition = () => {
+      syncDesktopHelpPopover(desktopHelpPopover.key, desktopHelpPopover.text)
+    }
+
+    const handlePointerDown = (event) => {
+      const trigger = helpTriggerRefs.current.get(desktopHelpPopover.key)
+      if (trigger && trigger.contains(event.target)) {
+        return
+      }
+
+      setActiveHelpKey(null)
+      setDesktopHelpPopover(null)
+    }
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setActiveHelpKey(null)
+        setDesktopHelpPopover(null)
+      }
+    }
+
+    window.addEventListener('resize', refreshPosition)
+    window.addEventListener('scroll', refreshPosition, true)
+    document.addEventListener('pointerdown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+
+    return () => {
+      window.removeEventListener('resize', refreshPosition)
+      window.removeEventListener('scroll', refreshPosition, true)
+      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [desktopHelpPopover, isMobile, syncDesktopHelpPopover])
+
   const renderHelpHint = (key, text) => (
     <span className="help-inline">
       <button
         type="button"
         className="help-trigger"
+        data-help-key={key}
         aria-label="Show simple explanation"
         aria-expanded={activeHelpKey === key}
-        onClick={() => setActiveHelpKey((current) => (current === key ? null : key))}
+        ref={(node) => {
+          if (node) {
+            helpTriggerRefs.current.set(key, node)
+          } else {
+            helpTriggerRefs.current.delete(key)
+          }
+        }}
+        onClick={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          const triggerButton = event.currentTarget
+          setActiveHelpKey((current) => {
+            const nextKey = current === key ? null : key
+            if (isMobile) {
+              setDesktopHelpPopover(null)
+            } else if (nextKey) {
+              setDesktopHelpPopover(buildDesktopHelpPopover(triggerButton, text, key))
+            } else {
+              setDesktopHelpPopover(null)
+            }
+            return nextKey
+          })
+        }}
+        onMouseDown={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+        }}
+        onKeyDown={(event) => {
+          event.stopPropagation()
+        }}
       >
         i
       </button>
-      {!isMobile && activeHelpKey === key && <span className="help-popover">{text}</span>}
     </span>
   )
 
@@ -2940,6 +3105,18 @@ function App() {
         </div>
       )}
 
+      {!isMobile && desktopHelpPopover && (
+        <div
+          ref={desktopHelpPopoverRef}
+          className={`help-popover-global help-popover-global-${desktopHelpPopover.placement}`}
+          style={desktopHelpPopover.style}
+          role="status"
+          aria-live="polite"
+        >
+          {desktopHelpPopover.text}
+        </div>
+      )}
+
       {visibleActiveTab === 'dashboard' && (
         <section className="dashboard-layout view-stage">
           <div className="stack">
@@ -2956,7 +3133,7 @@ function App() {
                         className="mini-link"
                         onClick={() => setSelectedDashboardOwner('')}
                       >
-                        Clear filter
+                        Clear selection
                       </button>
                     </div>
                   ) : null}
@@ -2980,15 +3157,15 @@ function App() {
             <div className="stats-grid">
               <article className="stat-card accent">
                 <span className="stat-label-row">
-                  <span>Active principal</span>
-                  {renderHelpHint('active-principal', 'This is the total amount still invested in open deposits.')}
+                  <span>Current investments</span>
+                  {renderHelpHint('active-principal', 'This is the total amount currently invested in open deposits.')}
                 </span>
                 <strong>{formatCurrency(stats.openPrincipal)}</strong>
                 <small>{stats.openDeposits} open</small>
               </article>
               <article className="stat-card">
                 <span className="stat-label-row">
-                  <span>Interest realised</span>
+                  <span>Interest earned (this year)</span>
                   {renderHelpHint('interest-realised', 'This is the interest already earned in the selected financial year.')}
                 </span>
                 <strong>{formatCurrency(stats.realisedInterest)}</strong>
@@ -3002,8 +3179,8 @@ function App() {
                 onKeyDown={(event) => handleActionCardKeyDown(event, showMaturityDrilldown)}
               >
                 <span className="stat-label-row">
-                  <span>Unused maturity cash</span>
-                  {renderHelpHint('unused-maturity-cash', 'This is maturity money already received but not yet used in a new investment.')}
+                  <span>Maturity cash available</span>
+                  {renderHelpHint('unused-maturity-cash', 'This is maturity cash already received and available to reinvest.')}
                 </span>
                 <strong>{formatCurrency(stats.uninvestedMaturityCash)}</strong>
                 <small>FY {stats.currentFinancialYearLabel} | View investments</small>
@@ -3016,8 +3193,8 @@ function App() {
                 onKeyDown={(event) => handleActionCardKeyDown(event, showUnusedInterestDrilldown)}
               >
                 <span className="stat-label-row">
-                  <span>Interest not reused</span>
-                  {renderHelpHint('interest-not-reused', 'This is interest already received but still sitting unused.')}
+                  <span>Interest cash available</span>
+                  {renderHelpHint('interest-not-reused', 'This is interest cash already received and available to reinvest.')}
                 </span>
                 <strong>{formatCurrency(stats.uninvestedInterestCash)}</strong>
                 <small>FY {stats.currentFinancialYearLabel} | View investments</small>
@@ -3030,7 +3207,7 @@ function App() {
                 onKeyDown={(event) => handleActionCardKeyDown(event, showUpcomingInterestDrilldown)}
               >
                 <span className="stat-label-row">
-                  <span>Upcoming interest</span>
+                  <span>Upcoming interest payouts</span>
                   {renderHelpHint('upcoming-interest', 'This only shows future interest for deposits that pay interest before maturity, like quarterly or yearly payout products.')}
                 </span>
                 <strong>{formatCurrency(stats.futureInterestCash)}</strong>
@@ -3054,7 +3231,7 @@ function App() {
                 className="secondary-btn compact dashboard-action-btn"
                 onClick={() => setIsTaxViewOpen(true)}
               >
-                Open tax view
+                View tax details
               </button>
             </article>
             ) : null}
@@ -3104,7 +3281,7 @@ function App() {
                       className="secondary-btn compact ghost-btn dashboard-toggle-btn"
                       onClick={() => setShowAllMaturityItems((current) => !current)}
                     >
-                      {showAllMaturityItems ? 'Show less' : 'View all'}
+                      {showAllMaturityItems ? 'Show fewer' : 'View full list'}
                     </button>
                   ) : null}
                   <button
@@ -3139,7 +3316,7 @@ function App() {
                       </span>
                     </div>
                     <p>
-                      {deposit.holderName} | {deposit.accountNumber || 'No account no.'}
+                      {deposit.holderName} | {deposit.accountNumber || 'No account number'}
                     </p>
                     <p>
                       {deposit.instrumentType || 'Maturity'}
@@ -3175,8 +3352,8 @@ function App() {
                   </div>
                   <p>
                     {interestFocusMode === 'pending'
-                      ? 'Interest already received but not yet fully reused.'
-                      : 'Upcoming interest receipts that may be reused.'}
+                      ? 'Interest cash already received and available to reinvest.'
+                      : 'Upcoming interest payouts that may be reused.'}
                   </p>
                 </div>
                 <div className="section-head-actions">
@@ -3186,7 +3363,7 @@ function App() {
                       className="secondary-btn compact ghost-btn dashboard-toggle-btn"
                       onClick={() => setShowAllInterestItems((current) => !current)}
                     >
-                      {showAllInterestItems ? 'Show less' : 'View all'}
+                      {showAllInterestItems ? 'Show fewer' : 'View full list'}
                     </button>
                   ) : null}
                   <button
@@ -3217,7 +3394,7 @@ function App() {
                         </span>
                       </div>
                       <p>
-                        {event.holderName} | {event.accountNumber || 'No account no.'}
+                        {event.holderName} | {event.accountNumber || 'No account number'}
                       </p>
                       <p>
                         {formatCurrency(
@@ -3226,7 +3403,7 @@ function App() {
                       </p>
                       <p>
                         {interestFocusMode === 'pending'
-                          ? `${event.receiptCount} received interest receipts pending`
+                          ? `${event.receiptCount} received interest payout${event.receiptCount === 1 ? '' : 's'} available`
                           : `${event.receiptCount} upcoming payout${event.receiptCount === 1 ? '' : 's'} | ${formatDate(event.nextPaymentDate)}`}
                       </p>
                       {interestFocusMode === 'pending' && (
@@ -3240,7 +3417,7 @@ function App() {
                   interestFocusMode === 'pending' ? (
                     <div className="empty-state-card">
                       <div className="empty-state-icon" aria-hidden="true">○</div>
-                      <p className="lineage-empty">No received interest is waiting for reinvestment.</p>
+                      <p className="lineage-empty">No received interest cash is available to reinvest.</p>
                     </div>
                   ) : (
                     <p className="lineage-empty">No upcoming periodic interest payouts in the schedule.</p>
@@ -3333,7 +3510,7 @@ function App() {
                     <p>
                       <strong>
                         <span className="owner-card-icon-label" aria-hidden="true">FY</span>
-                        <span>Contribution</span>
+                      <span>Share of total interest</span>
                       </strong>
                       <span>
                         {formatCurrency(owner.fyContribution)}

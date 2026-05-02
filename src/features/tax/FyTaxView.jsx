@@ -370,7 +370,7 @@ export default function FyTaxView({
               <div className="dashboard-filter-chips tax-filter-chip-row">
                 <span className="pill open">{selectedOwnerName}</span>
                 <button type="button" className="mini-link" onClick={() => onSelectOwner?.('')}>
-                  Clear filter
+                  Clear selection
                 </button>
               </div>
             ) : null}
@@ -423,7 +423,7 @@ export default function FyTaxView({
                 className="mini-link tax-show-more"
                 onClick={() => setShowAllContributors((current) => !current)}
               >
-                {showAllContributors ? 'Show top 3 only' : `View all ${topContributors.length}`}
+                {showAllContributors ? 'Show fewer' : `View full list (${topContributors.length})`}
               </button>
             ) : null}
           </section>
@@ -440,7 +440,7 @@ export default function FyTaxView({
               <span>Owner</span>
               <span>Investments</span>
               <span>FY interest</span>
-              <span>Contribution</span>
+              <span>Share of total interest</span>
             </div>
             <div className="tax-owner-stack">
           {visibleOwnerSummaries.map((ownerSummary) => {
@@ -531,7 +531,7 @@ export default function FyTaxView({
                                   </div>
                                   <div className="tax-group-summary-metrics">
                                     <strong>{formatCurrency(group.totalEstimatedTaxableInterest)}</strong>
-                                        <small>Total contribution</small>
+                                        <small>Total interest from this group</small>
                                   </div>
                                 </button>
 
@@ -548,7 +548,7 @@ export default function FyTaxView({
                                       >
                                         <div className="tax-breakdown-head">
                                           <div>
-                                            <strong>{investment.accountNumber || 'No account no.'}</strong>
+                                            <strong>{investment.accountNumber || 'No account number'}</strong>
                                             <p>{investment.investmentType || 'Investment'} | {investment.valueDate} to {investment.maturityDate}</p>
                                           </div>
                                           <span className={`pill ${String(investment.status || '').trim().toUpperCase() === 'CLOSED' ? 'closed' : 'open'}`}>
@@ -559,8 +559,8 @@ export default function FyTaxView({
                                           <p><span>Principal</span><strong>{formatCurrency(investment.principal)}</strong></p>
                                           <p><span>Rate</span><strong>{formatInterestRate(investment.interestRate)}</strong></p>
                                           <p><span>Taxable interest</span><strong>{formatCurrency(investment.estimatedTaxableInterest)}</strong></p>
-                                          <p><span>Calc frequency</span><strong>{investment.calculationFrequency || getCalculationFrequencyFromAppliedRule(investment.appliedRule) || 'Auto'}</strong></p>
-                                          <p><span>Payout</span><strong>{formatPayoutFrequencyLabel(investment.payoutFrequency || getPayoutFrequencyFromAppliedRule(investment.appliedRule))}</strong></p>
+                                          <p><span>Calculation frequency</span><strong>{investment.calculationFrequency || getCalculationFrequencyFromAppliedRule(investment.appliedRule) || 'Auto'}</strong></p>
+                                          <p><span>Interest payout</span><strong>{formatPayoutFrequencyLabel(investment.payoutFrequency || getPayoutFrequencyFromAppliedRule(investment.appliedRule))}</strong></p>
                                         </div>
                                       </article>
                                     ))}
@@ -571,7 +571,7 @@ export default function FyTaxView({
                           })}
                           {hiddenGroupCount > 0 ? (
                             <p className="tax-hidden-note">
-                              View {hiddenGroupCount} more grouped contribution{hiddenGroupCount === 1 ? '' : 's'}
+                              View {hiddenGroupCount} more interest group{hiddenGroupCount === 1 ? '' : 's'}
                             </p>
                           ) : null}
                         </div>
@@ -650,7 +650,7 @@ export default function FyTaxView({
                                           </div>
                                           <div className="tax-group-summary-metrics">
                                             <strong>{formatCurrency(group.totalEstimatedTaxableInterest)}</strong>
-                                            <small>Total contribution</small>
+                                            <small>Total interest from this group</small>
                                           </div>
                                         </button>
 
@@ -667,7 +667,7 @@ export default function FyTaxView({
                                               >
                                                 <div className="tax-breakdown-head">
                                                   <div>
-                                                    <strong>{investment.accountNumber || 'No account no.'}</strong>
+                                                    <strong>{investment.accountNumber || 'No account number'}</strong>
                                                     <p>{investment.investmentType || 'Investment'} | {investment.valueDate} to {investment.maturityDate}</p>
                                                   </div>
                                                   <span className={`pill ${String(investment.status || '').trim().toUpperCase() === 'CLOSED' ? 'closed' : 'open'}`}>
@@ -678,8 +678,8 @@ export default function FyTaxView({
                                                   <p><span>Principal</span><strong>{formatCurrency(investment.principal)}</strong></p>
                                                   <p><span>Rate</span><strong>{formatInterestRate(investment.interestRate)}</strong></p>
                                                   <p><span>Taxable interest</span><strong>{formatCurrency(investment.estimatedTaxableInterest)}</strong></p>
-                                                  <p><span>Calc frequency</span><strong>{investment.calculationFrequency || getCalculationFrequencyFromAppliedRule(investment.appliedRule) || 'Auto'}</strong></p>
-                                                  <p><span>Payout</span><strong>{formatPayoutFrequencyLabel(investment.payoutFrequency || getPayoutFrequencyFromAppliedRule(investment.appliedRule))}</strong></p>
+                                                  <p><span>Calculation frequency</span><strong>{investment.calculationFrequency || getCalculationFrequencyFromAppliedRule(investment.appliedRule) || 'Auto'}</strong></p>
+                                                  <p><span>Interest payout</span><strong>{formatPayoutFrequencyLabel(investment.payoutFrequency || getPayoutFrequencyFromAppliedRule(investment.appliedRule))}</strong></p>
                                                 </div>
                                               </article>
                                             ))}
@@ -690,7 +690,7 @@ export default function FyTaxView({
                                   })}
                                   {hiddenGroupCount > 0 ? (
                                     <p className="tax-hidden-note">
-                                      View {hiddenGroupCount} more grouped contribution{hiddenGroupCount === 1 ? '' : 's'}
+                                      View {hiddenGroupCount} more interest group{hiddenGroupCount === 1 ? '' : 's'}
                                     </p>
                                   ) : null}
                                 </div>

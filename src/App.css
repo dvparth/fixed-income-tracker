@@ -1054,6 +1054,18 @@
   grid-template-columns: minmax(0, 1.7fr) minmax(240px, 0.7fr);
   gap: 18px;
   align-items: start;
+  position: relative;
+  isolation: isolate;
+}
+
+.dashboard-layout > .stack:first-child {
+  position: relative;
+  z-index: 3;
+}
+
+.dashboard-layout > *:not(.stack:first-child) {
+  position: relative;
+  z-index: 1;
 }
 
 .stats-grid,
@@ -1653,14 +1665,16 @@
   font-size: 0.68rem;
   font-weight: 700;
   line-height: 1;
+  position: relative;
+  z-index: 2;
 }
 
 .help-popover {
   position: absolute;
-  top: calc(100% + 8px);
+  bottom: calc(100% + 8px);
   left: 50%;
   transform: translateX(-50%);
-  z-index: 8;
+  z-index: 40;
   width: min(220px, 70vw);
   padding: 10px 12px;
   border-radius: 12px;
@@ -1674,8 +1688,29 @@
   letter-spacing: normal;
 }
 
+.help-popover-global {
+  position: fixed;
+  z-index: 120;
+  width: min(240px, calc(100vw - 24px));
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--card-bg) 98%, transparent);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 12px 24px color-mix(in srgb, var(--shadow-color) 140%, transparent);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  text-transform: none;
+  letter-spacing: normal;
+  pointer-events: none;
+}
+
 @media (max-width: 780px) {
   .help-popover {
+    display: none;
+  }
+
+  .help-popover-global {
     display: none;
   }
 }
@@ -2084,7 +2119,8 @@
 
 .deposit-group-copy {
   display: grid;
-  gap: 4px;
+  gap: 6px;
+  min-width: 0;
 }
 
 .deposit-group-copy strong {
@@ -2092,16 +2128,37 @@
   font-size: 1rem;
 }
 
+.deposit-group-amount {
+  font-size: 1.5rem !important;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  word-break: keep-all;
+  overflow-wrap: normal;
+}
+
+.deposit-group-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.deposit-group-title-row strong {
+  font-size: 1rem;
+  line-height: 1.2;
+}
+
 .deposit-group-copy span {
   color: var(--text-secondary);
   font-size: 0.8rem;
+  line-height: 1.35;
 }
 
 .deposit-group-metrics {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(110px, 1fr));
   gap: 12px;
-  min-width: min(100%, 420px);
+  min-width: 360px;
 }
 
 .deposit-group-metrics div {
@@ -2118,6 +2175,7 @@
 .deposit-group-metrics strong {
   color: var(--text-primary);
   font-size: 0.92rem;
+  line-height: 1.25;
 }
 
 .deposit-group-items {
