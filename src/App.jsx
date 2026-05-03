@@ -1,5 +1,6 @@
 import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
+import yieldFlowLogo from './assets/yieldflow-logo.svg'
 import AdminView from './features/admin/AdminView.jsx'
 import AuthView from './features/auth/AuthView.jsx'
 import DepositsView from './features/deposits/DepositsView.jsx'
@@ -2373,16 +2374,7 @@ function App() {
     maturityDateFrom !== '' ||
     maturityDateTo !== '' ||
     !showClosed
-  const mobileCompactHeaderTitle =
-    visibleActiveTab === 'dashboard'
-      ? 'Dashboard'
-      : visibleActiveTab === 'deposits'
-        ? 'Deposits'
-        : visibleActiveTab === 'masters'
-          ? mobileMastersTitle
-          : visibleActiveTab === 'admin'
-            ? mobileAdminTitle
-            : mobileEditorTitle
+  const mobileCompactHeaderTitle = 'FIXED INCOME PORTFOLIO TRACKER'
   const mobileFilterBadges = [
     searchScope !== 'all' ? `Scope: ${searchScope === 'holder'
       ? 'Holder'
@@ -2726,9 +2718,12 @@ function App() {
       {showAppHeader && (
         <header className="app-header">
           <div className="app-topbar">
-            <div className="app-topbar-copy">
-              <strong className="app-topbar-title">YieldFlow</strong>
-              <span className="app-topbar-subtitle">{mobileCompactHeaderTitle}</span>
+            <div className="app-topbar-brand">
+              <img src={yieldFlowLogo} alt="YieldFlow logo" className="app-logo" />
+              <div className="app-topbar-copy">
+                <strong className="app-topbar-title">Yield<span>Flow</span></strong>
+                <span className="app-topbar-subtitle">{mobileCompactHeaderTitle}</span>
+              </div>
             </div>
             <div className="app-topbar-actions">
               {!isMobile && canEditPortfolio && (
@@ -3069,9 +3064,12 @@ function App() {
 
       {showFullHeroCard && (
         <header className="hero-card">
-          <div>
-            <p className="eyebrow">YieldFlow</p>
-            <h1>Track maturity and reinvestment.</h1>
+          <div className="hero-brand">
+            <img src={yieldFlowLogo} alt="YieldFlow logo" className="hero-logo" />
+            <div>
+              <p className="eyebrow">YieldFlow</p>
+              <h1 className="hero-title">Track maturity and reinvestment.</h1>
+            </div>
           </div>
           <div className="hero-actions">
             {canEditPortfolio && (
