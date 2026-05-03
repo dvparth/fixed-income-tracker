@@ -2855,32 +2855,6 @@ function App() {
               </button>
           </div>
 
-          <section className="settings-section settings-section-subtle settings-about-section">
-            <div className="settings-about-copy">
-              <span className="settings-about-eyebrow">YieldFlow</span>
-              <strong>Built by Parth Dave</strong>
-              <p>Technology Leader • Banking &amp; Financial Systems</p>
-            </div>
-            <div className="settings-about-actions">
-              <a
-                className="secondary-btn compact ghost-btn"
-                href={AUTHOR_LINKEDIN_URL}
-                target="_blank"
-                rel="noreferrer"
-              >
-                View LinkedIn
-              </a>
-              <button
-                type="button"
-                className="help-trigger settings-about-trigger"
-                onClick={() => setIsAboutOpen(true)}
-                aria-label="About YieldFlow"
-              >
-                ℹ
-              </button>
-            </div>
-          </section>
-
           <div className="settings-accordion">
             <section className="settings-accordion-item">
               <button
@@ -3823,6 +3797,10 @@ function App() {
         <a href={AUTHOR_LINKEDIN_URL} target="_blank" rel="noreferrer">
           LinkedIn
         </a>
+        <span aria-hidden="true">•</span>
+        <button type="button" className="footer-inline-btn" onClick={() => setIsAboutOpen(true)}>
+          About
+        </button>
         <span aria-hidden="true">•</span>
         <a href={`${APP_HOME_URL}/privacy`}>Privacy</a>
         <span aria-hidden="true">•</span>

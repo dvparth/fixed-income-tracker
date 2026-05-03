@@ -740,13 +740,26 @@
   font-size: 0.76rem;
 }
 
-.app-footer-signature a {
+
+.app-footer-signature a,
+.app-footer-signature .footer-inline-btn {
   color: var(--text-secondary);
   text-decoration: none;
 }
 
+.footer-inline-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
 .app-footer-signature a:hover,
-.app-footer-signature a:focus-visible {
+.app-footer-signature a:focus-visible,
+.app-footer-signature .footer-inline-btn:hover,
+.app-footer-signature .footer-inline-btn:focus-visible {
   color: var(--accent-color);
   text-decoration: underline;
 }
