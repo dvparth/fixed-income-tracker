@@ -69,6 +69,14 @@ VITE_API_BASE_URL=
 VITE_API_PROXY_TARGET=http://localhost:4000
 SERVER_SESSION_SECRET=replace-with-a-long-random-secret
 SERVER_ADMIN_EMAILS=admin@example.com
+SERVER_CSRF_STRICT_ORIGIN=true
+SERVER_RATE_LIMIT_WINDOW_MS=900000
+SERVER_AUTH_RATE_LIMIT_MAX=20
+SERVER_WRITE_RATE_LIMIT_MAX=120
+SERVER_IMPORT_RATE_LIMIT_MAX=10
+SERVER_BACKUP_RESTORE_RATE_LIMIT_MAX=5
+SERVER_TRUST_PROXY=false
+SERVER_HEALTH_DETAIL_TOKEN=
 ```
 
 Use `VITE_API_BASE_URL` when the frontend should call an absolute backend URL directly.
@@ -93,6 +101,8 @@ Frontend runs on Vite and proxies `/api` requests to the Express backend.
 - `npm.cmd run dev` - run frontend and backend together
 - `npm.cmd run build` - build the frontend
 - `npm.cmd run lint` - run ESLint
+- `npm.cmd test` - run API and financial logic tests
+- `npm.cmd audit` - run npm dependency audit
 
 ## Architecture Notes
 
@@ -101,6 +111,11 @@ Frontend runs on Vite and proxies `/api` requests to the Express backend.
 - The app now operates against stored data only, with no in-memory demo fallback.
 - Reference values such as owners, funding sources, institutions, branches, and instrument types now flow through a shared master-data model.
 - MongoDB collections are isolated for this application in a dedicated YieldFlow database: `investments`, `masterData`, `users`, `sessions`, `portfolioShares`, and `auditLogs`.
+- State-changing API requests are protected by strict Origin/Referer checks, request schemas deny unknown fields before writes, and production startup requires `SERVER_ALLOWED_ORIGINS`.
+- Public health output is intentionally minimal; detailed health requires an admin session or `SERVER_HEALTH_DETAIL_TOKEN`.
+- Audit logs store scoped action metadata and high-risk markers instead of routine full before/after snapshots.
+- v2 admin controls should add MFA, just-in-time elevation, high-risk action alerts, and audit retention cleanup jobs.
+- React user data should remain text-rendered; do not introduce `dangerouslySetInnerHTML` without a dedicated sanitizer and review.
 
 ## Roadmap
 

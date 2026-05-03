@@ -2,9 +2,12 @@ import crypto from 'node:crypto'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import express from 'express'
+import { rateLimit, ipKeyGenerator } from 'express-rate-limit'
+import helmet from 'helmet'
 import mongoose from 'mongoose'
 import multer from 'multer'
 import * as XLSX from 'xlsx'
+import { z, ZodError } from 'zod'
 import { generateOwnerWiseFYTaxSummary, parseFinancialYearLabel } from '../shared/fyTaxEngine.js'
 import { INVESTMENT_IMPORT_REQUIRED_COLUMNS, INVESTMENT_IMPORT_SHEET_NAME } from '../shared/investmentImport.js'
 import { emptyMasterData, normalizeMasterData } from '../shared/masterData.js'
@@ -14,6 +17,7 @@ dotenv.config()
 
 const app = express()
 const PORT = Number(process.env.SERVER_PORT || 4000)
+const isProduction = process.env.NODE_ENV === 'production'
 const mongoUri = process.env.SERVER_MONGO_URI
 const googleClientId = String(process.env.SERVER_GOOGLE_CLIENT_ID || '').trim()
 const sessionSecret = String(process.env.SERVER_SESSION_SECRET || '').trim()
@@ -44,6 +48,20 @@ const parsePositiveNumberEnv = (value, fallback) => {
   const number = Number(value)
   return Number.isFinite(number) && number > 0 ? number : fallback
 }
+const parseBooleanEnv = (value, fallback = false) => {
+  const normalized = String(value ?? '').trim().toLowerCase()
+  if (normalized === 'true') {
+    return true
+  }
+  if (normalized === 'false') {
+    return false
+  }
+  return fallback
+}
+
+if (isProduction && allowedOrigins.length === 0) {
+  throw new Error('SERVER_ALLOWED_ORIGINS is required in production')
+}
 
 if (!mongoUri) {
   throw new Error('SERVER_MONGO_URI is missing from the environment')
@@ -66,6 +84,33 @@ const UPLOAD_MAX_BYTES =
 const BACKUP_PREVIEW_ROW_LIMIT = Math.floor(
   parsePositiveNumberEnv(process.env.SERVER_BACKUP_PREVIEW_ROW_LIMIT, 8),
 )
+const RATE_LIMIT_WINDOW_MS = parsePositiveNumberEnv(
+  process.env.SERVER_RATE_LIMIT_WINDOW_MS,
+  15 * 60 * 1000,
+)
+const AUTH_RATE_LIMIT_MAX = Math.floor(
+  parsePositiveNumberEnv(process.env.SERVER_AUTH_RATE_LIMIT_MAX, 20),
+)
+const WRITE_RATE_LIMIT_MAX = Math.floor(
+  parsePositiveNumberEnv(process.env.SERVER_WRITE_RATE_LIMIT_MAX, 120),
+)
+const IMPORT_RATE_LIMIT_MAX = Math.floor(
+  parsePositiveNumberEnv(process.env.SERVER_IMPORT_RATE_LIMIT_MAX, 10),
+)
+const BACKUP_RESTORE_RATE_LIMIT_MAX = Math.floor(
+  parsePositiveNumberEnv(process.env.SERVER_BACKUP_RESTORE_RATE_LIMIT_MAX, 5),
+)
+const HEALTH_DETAIL_TOKEN = String(process.env.SERVER_HEALTH_DETAIL_TOKEN || '').trim()
+const CSRF_STRICT_ORIGIN = parseBooleanEnv(process.env.SERVER_CSRF_STRICT_ORIGIN, true)
+const HIGH_RISK_ACTIONS = new Set([
+  'admin.investment.delete',
+  'admin.backup.restore',
+  'admin.exportData.download',
+  'admin.masterData.update',
+  'admin.masterData.create',
+  'share.create',
+  'share.delete',
+])
 const importUpload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -195,6 +240,140 @@ const normalizeDepositDoc = (deposit) => ({
   createdByUserId: deposit.createdByUserId ? String(deposit.createdByUserId) : '',
   updatedByUserId: deposit.updatedByUserId ? String(deposit.updatedByUserId) : '',
 })
+
+const optionalTextField = z.union([z.string(), z.literal('')]).optional()
+const numericFormField = z.union([z.number(), z.literal('')]).optional()
+const booleanField = z.boolean().optional()
+const idParamSchema = z.object({ id: z.string().trim().min(1).max(240) }).strict()
+const ownerScopedQuerySchema = z.object({
+  ownerUserId: z.string().trim().min(1).max(120).optional(),
+}).strict()
+const taxQuerySchema = ownerScopedQuerySchema.extend({
+  fy: z.string().trim().min(1).max(12).optional(),
+}).strict()
+const importQuerySchema = ownerScopedQuerySchema.extend({
+  dryRun: z.enum(['true', 'false']).optional(),
+}).strict()
+const googleAuthBodySchema = z.object({
+  credential: z.string().trim().min(1),
+}).strict()
+const shareCreateBodySchema = z.object({
+  guestEmail: z.string().trim().email().max(320),
+}).strict()
+const allocationSchema = z.object({
+  eventId: z.string().trim().min(1).max(260),
+  amount: z.number().positive(),
+}).strict()
+const cashSettlementSchema = z.object({
+  eventId: z.string().trim().min(1).max(260),
+  amount: z.number().positive(),
+  settledAt: optionalTextField,
+}).strict()
+const depositWriteBodySchema = z.object({
+  id: z.string().trim().min(1).max(240).optional(),
+  srNo: numericFormField,
+  bankName: optionalTextField,
+  branchCity: optionalTextField,
+  holderName: optionalTextField,
+  fundingSource: optionalTextField,
+  instrumentType: optionalTextField,
+  calculationFrequency: optionalTextField,
+  payoutMode: optionalTextField,
+  yearlyPayoutMonthDay: optionalTextField,
+  interestPayoutBeforeTds: numericFormField,
+  interestPayoutAfterTds: numericFormField,
+  accountNumber: optionalTextField,
+  tenureYears: numericFormField,
+  tenureMonths: numericFormField,
+  tenureDays: numericFormField,
+  interestRate: numericFormField,
+  principalAmount: numericFormField,
+  investmentDate: optionalTextField,
+  maturityDate: optionalTextField,
+  maturityBeforeTax: numericFormField,
+  maturityAfterTax: numericFormField,
+  totalInterestEarned: numericFormField,
+  tdsPercent: numericFormField,
+  tdsAmount: numericFormField,
+  status: optionalTextField,
+  allocations: z.array(allocationSchema).optional(),
+  cashSettlements: z.array(cashSettlementSchema).optional(),
+  notes: optionalTextField,
+  isDeleted: booleanField,
+  deletedAt: optionalTextField,
+  ownerUserId: optionalTextField,
+  createdByUserId: optionalTextField,
+  updatedByUserId: optionalTextField,
+  createdAt: optionalTextField,
+  updatedAt: optionalTextField,
+  _id: z.any().optional(),
+  __v: z.any().optional(),
+}).strict()
+const namedMasterItemSchema = z.object({
+  id: z.string().trim().max(120).optional(),
+  name: z.string().trim().min(1).max(160),
+}).strict()
+const ownerMasterSchema = namedMasterItemSchema.extend({
+  ownerType: z.string().trim().max(80).optional(),
+  taxSlabRate: z.number().min(0).max(100).optional(),
+  aliases: z.array(z.string().trim().min(1).max(160)).optional(),
+}).strict()
+const institutionMasterSchema = namedMasterItemSchema.extend({
+  branches: z.array(namedMasterItemSchema).optional(),
+}).strict()
+const masterDataBodySchema = z.object({
+  owners: z.array(ownerMasterSchema).optional(),
+  institutions: z.array(institutionMasterSchema).optional(),
+  instrumentTypes: z.array(namedMasterItemSchema).optional(),
+}).strict()
+
+const validateRequest = (schema, source = 'body') => (request, response, next) => {
+  const result = schema.safeParse(request[source] || {})
+  if (!result.success) {
+    response.status(400).json({
+      message: 'Request validation failed',
+      requestId: request.requestId,
+      issues: result.error.issues.map((issue) => ({
+        path: issue.path.join('.'),
+        message: issue.message,
+      })),
+    })
+    return
+  }
+
+  if (source === 'query') {
+    Object.keys(request.query).forEach((key) => {
+      delete request.query[key]
+    })
+    Object.assign(request.query, result.data)
+  } else {
+    request[source] = result.data
+  }
+  next()
+}
+
+const sanitizeDepositWritePayload = (payload = {}) => {
+  const parsed = depositWriteBodySchema.parse(payload)
+  const sanitized = { ...parsed }
+  delete sanitized.ownerUserId
+  delete sanitized.createdByUserId
+  delete sanitized.updatedByUserId
+  delete sanitized.createdAt
+  delete sanitized.updatedAt
+  delete sanitized._id
+  delete sanitized.__v
+  delete sanitized.isDeleted
+  delete sanitized.deletedAt
+  return sanitized
+}
+
+const sanitizeRestoredDepositPayload = (payload = {}) => {
+  const sanitized = { ...depositWriteBodySchema.parse(payload) }
+  delete sanitized.ownerUserId
+  delete sanitized._id
+  delete sanitized.__v
+  return sanitized
+}
 
 const normalizeSystemRole = (user) => {
   const email = String(user?.email || '').trim().toLowerCase()
@@ -613,14 +792,23 @@ const getMongoConnectionState = (readyState) => {
 const buildHealthPayload = () => {
   const mongoState = getMongoConnectionState(mongoose.connection.readyState)
   const isMongoHealthy = mongoState === 'connected'
-  const uptimeSeconds = Math.floor(process.uptime())
-  const databaseName = String(mongoose.connection.name || '').trim()
 
   return {
     ok: isMongoHealthy,
     status: isMongoHealthy ? 'healthy' : 'degraded',
     service: 'YieldFlow API',
     timestamp: new Date().toISOString(),
+  }
+}
+
+const buildDetailedHealthPayload = () => {
+  const mongoState = getMongoConnectionState(mongoose.connection.readyState)
+  const isMongoHealthy = mongoState === 'connected'
+  const databaseName = String(mongoose.connection.name || '').trim()
+  const uptimeSeconds = Math.floor(process.uptime())
+
+  return {
+    ...buildHealthPayload(),
     uptimeSeconds,
     environment: process.env.NODE_ENV || 'development',
     port: PORT,
@@ -2061,6 +2249,61 @@ const getMasterData = async (ownerUserId, { createIfMissing = false, session } =
   return normalizeMasterData(created.toObject())
 }
 
+const summarizeAuditValue = (value) => {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  if (Array.isArray(value)) {
+    return {
+      type: 'array',
+      count: value.length,
+    }
+  }
+
+  if (typeof value === 'object') {
+    return {
+      type: 'object',
+      fields: Object.keys(value).sort(),
+    }
+  }
+
+  return value
+}
+
+const countItems = (value) => (Array.isArray(value) ? value.length : 0)
+
+const sanitizeAuditMetadata = (metadata) => {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return metadata || null
+  }
+
+  return Object.entries(metadata).reduce((safeMetadata, [key, value]) => {
+    if (['before', 'after', 'masterData', 'deposits'].includes(key)) {
+      safeMetadata[key] = summarizeAuditValue(value)
+      return safeMetadata
+    }
+
+    if (key === 'createdValues' && value && typeof value === 'object') {
+      safeMetadata.createdValueCounts = {
+        owners: countItems(value.owners),
+        institutions: countItems(value.institutions),
+        branches: countItems(value.branches),
+        instrumentTypes: countItems(value.instrumentTypes),
+      }
+      return safeMetadata
+    }
+
+    if (key === 'cleanedFundingLinks' && Array.isArray(value)) {
+      safeMetadata.cleanedFundingLinkCount = value.length
+      return safeMetadata
+    }
+
+    safeMetadata[key] = value
+    return safeMetadata
+  }, {})
+}
+
 const writeAdminAuditLog = async ({
   actor,
   action,
@@ -2072,7 +2315,8 @@ const writeAdminAuditLog = async ({
   metadata = null,
   session = null,
 }) => {
-  if (actor?.systemRole !== 'admin') {
+  const isHighRisk = HIGH_RISK_ACTIONS.has(action)
+  if (actor?.systemRole !== 'admin' && !isHighRisk) {
     return
   }
 
@@ -2086,9 +2330,12 @@ const writeAdminAuditLog = async ({
         targetType,
         targetRecordId,
         targetOwnerUserId,
-        before,
-        after,
-        metadata,
+        before: summarizeAuditValue(before),
+        after: summarizeAuditValue(after),
+        metadata: sanitizeAuditMetadata({
+          ...(metadata || {}),
+          highRisk: isHighRisk,
+        }),
       },
     ],
     session ? { session } : undefined,
@@ -2176,6 +2423,157 @@ const removeFundingLinksForDeletedDeposit = async ({
   return updatedChildren
 }
 
+const getRequestOrigin = (request) => {
+  const origin = String(request.headers.origin || '').trim()
+  if (origin) {
+    return origin
+  }
+
+  const referer = String(request.headers.referer || request.headers.referrer || '').trim()
+  if (!referer) {
+    return ''
+  }
+
+  try {
+    return new URL(referer).origin
+  } catch {
+    return ''
+  }
+}
+
+const getServerOrigin = (request) => `${request.protocol}://${request.get('host')}`
+
+const isAllowedRequestOrigin = (request, requestOrigin) => {
+  if (!requestOrigin) {
+    return !isProduction || !CSRF_STRICT_ORIGIN
+  }
+
+  if (requestOrigin === getServerOrigin(request)) {
+    return true
+  }
+
+  return allowedOrigins.includes(requestOrigin)
+}
+
+const rejectRequest = (response, status, message, requestId, extra = {}) => {
+  response.status(status).json({
+    message,
+    requestId,
+    ...extra,
+  })
+}
+
+const requestIdMiddleware = (request, response, next) => {
+  request.requestId = String(request.headers['x-request-id'] || '').trim() || crypto.randomUUID()
+  response.setHeader('X-Request-Id', request.requestId)
+  next()
+}
+
+const csrfOriginProtection = (request, response, next) => {
+  if (!CSRF_STRICT_ORIGIN || !['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) {
+    next()
+    return
+  }
+
+  const requestOrigin = getRequestOrigin(request)
+  if (!isAllowedRequestOrigin(request, requestOrigin)) {
+    console.warn('Blocked state-changing request with invalid origin', {
+      requestId: request.requestId,
+      method: request.method,
+      path: request.originalUrl,
+      origin: requestOrigin || 'missing',
+      ip: request.ip,
+      userId: request.sessionUser?.id || '',
+    })
+    rejectRequest(response, 403, 'Request origin is not allowed', request.requestId)
+    return
+  }
+
+  next()
+}
+
+const createSecurityRateLimiter = ({ name, max }) =>
+  rateLimit({
+    windowMs: RATE_LIMIT_WINDOW_MS,
+    max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (request) =>
+      request.sessionUser?.id
+        ? `user:${request.sessionUser.id}`
+        : `ip:${ipKeyGenerator(request.ip)}`,
+    handler: (request, response) => {
+      console.warn('Rate limit exceeded', {
+        limiter: name,
+        requestId: request.requestId,
+        method: request.method,
+        path: request.originalUrl,
+        ip: request.ip,
+        userId: request.sessionUser?.id || '',
+      })
+      rejectRequest(response, 429, 'Too many requests. Try again later.', request.requestId)
+    },
+  })
+
+const authRateLimiter = createSecurityRateLimiter({
+  name: 'auth',
+  max: AUTH_RATE_LIMIT_MAX,
+})
+const writeRateLimiter = createSecurityRateLimiter({
+  name: 'write',
+  max: WRITE_RATE_LIMIT_MAX,
+})
+const importRateLimiter = createSecurityRateLimiter({
+  name: 'import',
+  max: IMPORT_RATE_LIMIT_MAX,
+})
+const backupRestoreRateLimiter = createSecurityRateLimiter({
+  name: 'backup-restore',
+  max: BACKUP_RESTORE_RATE_LIMIT_MAX,
+})
+
+const validateHealthDetailAccess = (request, response, next) => {
+  const suppliedToken = String(request.headers['x-health-token'] || request.query.token || '').trim()
+  if (
+    (HEALTH_DETAIL_TOKEN && suppliedToken === HEALTH_DETAIL_TOKEN) ||
+    request.sessionUser?.systemRole === 'admin'
+  ) {
+    next()
+    return
+  }
+
+  rejectRequest(response, 404, 'Not found', request.requestId)
+}
+
+if (parseBooleanEnv(process.env.SERVER_TRUST_PROXY, false)) {
+  app.set('trust proxy', 1)
+}
+
+app.use(requestIdMiddleware)
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        baseUri: ["'self'"],
+        connectSrc: [
+          "'self'",
+          'https://accounts.google.com',
+          'https://oauth2.googleapis.com',
+          'https://www.googleapis.com',
+          'https://www.gstatic.com',
+          ...allowedOrigins,
+        ],
+        frameAncestors: ["'none'"],
+        imgSrc: ["'self'", 'data:', 'https://lh3.googleusercontent.com'],
+        objectSrc: ["'none'"],
+        scriptSrc: ["'self'", 'https://accounts.google.com', 'https://www.gstatic.com'],
+        styleSrc: ["'self'", "'unsafe-inline'", 'https://accounts.google.com'],
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+  }),
+)
 app.use(
   cors({
     origin(origin, callback) {
@@ -2184,23 +2582,39 @@ app.use(
         return
       }
 
-      if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+      if (!isProduction && allowedOrigins.length === 0) {
         callback(null, true)
         return
       }
 
-      callback(new Error(`CORS origin not allowed: ${origin}`))
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true)
+        return
+      }
+
+      callback(new Error('CORS origin not allowed'))
     },
     credentials: true,
   }),
 )
 app.use(express.json({ limit: '1mb' }))
 app.use(loadSessionUser)
+app.use(csrfOriginProtection)
 
 app.get('/api/health', (_request, response) => {
   const payload = buildHealthPayload()
   response.status(payload.ok ? 200 : 503).json(payload)
 })
+
+app.get(
+  '/api/health/details',
+  validateRequest(z.object({ token: z.string().trim().optional() }).strict(), 'query'),
+  validateHealthDetailAccess,
+  (_request, response) => {
+    const payload = buildDetailedHealthPayload()
+    response.status(payload.ok ? 200 : 503).json(payload)
+  },
+)
 
 app.get('/api/auth/session', async (request, response) => {
   if (!request.sessionUser) {
@@ -2211,7 +2625,7 @@ app.get('/api/auth/session', async (request, response) => {
   response.json(await buildSessionResponse(request.sessionUser))
 })
 
-app.post('/api/auth/google', async (request, response) => {
+app.post('/api/auth/google', authRateLimiter, validateRequest(googleAuthBodySchema), async (request, response) => {
   const googleProfile = await verifyGoogleCredential(request.body?.credential)
   const systemRole = adminEmails.has(googleProfile.email) ? 'admin' : 'user'
   const upsertedUser = await YieldflowUser.findOneAndUpdate(
@@ -2235,7 +2649,7 @@ app.post('/api/auth/google', async (request, response) => {
   response.json(await buildSessionResponse(normalizedUser))
 })
 
-app.post('/api/auth/logout', async (request, response) => {
+app.post('/api/auth/logout', writeRateLimiter, async (request, response) => {
   const sessionToken = parseCookies(request)[SESSION_COOKIE_NAME]
   if (sessionToken) {
     await YieldflowSession.deleteOne({ tokenHash: buildSessionTokenHash(sessionToken) })
@@ -2287,7 +2701,7 @@ app.get('/api/shares', requireAuth, requireUserRole, async (request, response) =
   })
 })
 
-app.post('/api/shares', requireAuth, requireUserRole, async (request, response) => {
+app.post('/api/shares', writeRateLimiter, requireAuth, requireUserRole, validateRequest(shareCreateBodySchema), async (request, response) => {
   const guestEmail = String(request.body?.guestEmail || '').trim().toLowerCase()
   if (!guestEmail) {
     response.status(400).json({ message: 'Guest email is required' })
@@ -2320,6 +2734,19 @@ app.post('/api/shares', requireAuth, requireUserRole, async (request, response) 
     { new: true, upsert: true, setDefaultsOnInsert: true },
   ).lean()
 
+  await writeAdminAuditLog({
+    actor: request.sessionUser,
+    action: 'share.create',
+    targetType: 'portfolioShare',
+    targetRecordId: String(savedShare._id),
+    targetOwnerUserId: request.sessionUser.id,
+    metadata: {
+      guestUserId: String(guestUser._id),
+      permission: 'read',
+      status: 'active',
+    },
+  })
+
   response.status(201).json({
     id: String(savedShare._id),
     ownerUserId: String(savedShare.ownerUserId),
@@ -2331,7 +2758,7 @@ app.post('/api/shares', requireAuth, requireUserRole, async (request, response) 
   })
 })
 
-app.delete('/api/shares/:id', requireAuth, requireUserRole, async (request, response) => {
+app.delete('/api/shares/:id', writeRateLimiter, requireAuth, requireUserRole, validateRequest(idParamSchema, 'params'), async (request, response) => {
   const deleted = await PortfolioShare.findOneAndDelete({
     _id: request.params.id,
     ownerUserId: request.sessionUser.id,
@@ -2342,12 +2769,27 @@ app.delete('/api/shares/:id', requireAuth, requireUserRole, async (request, resp
     return
   }
 
+  await writeAdminAuditLog({
+    actor: request.sessionUser,
+    action: 'share.delete',
+    targetType: 'portfolioShare',
+    targetRecordId: String(deleted._id),
+    targetOwnerUserId: request.sessionUser.id,
+    metadata: {
+      guestUserId: String(deleted.guestUserId),
+      permission: deleted.permission,
+      status: deleted.status,
+    },
+  })
+
   response.json({ ok: true })
 })
 
 app.post(
   '/api/investment-import',
+  importRateLimiter,
   requireAuth,
+  validateRequest(importQuerySchema, 'query'),
   resolvePortfolioContext,
   requirePortfolioWriteAccess,
   importUpload.single('file'),
@@ -2519,7 +2961,7 @@ app.post(
   },
 )
 
-app.get('/api/deposits', requireAuth, resolvePortfolioContext, async (request, response) => {
+app.get('/api/deposits', requireAuth, validateRequest(ownerScopedQuerySchema, 'query'), resolvePortfolioContext, async (request, response) => {
   const [deposits, masterData] = await Promise.all([
     Deposit.find({ ownerUserId: request.portfolioContext.ownerUserId }).lean(),
     getMasterData(request.portfolioContext.ownerUserId, {
@@ -2533,7 +2975,7 @@ app.get('/api/deposits', requireAuth, resolvePortfolioContext, async (request, r
   )
 })
 
-app.get('/api/master-data', requireAuth, resolvePortfolioContext, async (request, response) => {
+app.get('/api/master-data', requireAuth, validateRequest(ownerScopedQuerySchema, 'query'), resolvePortfolioContext, async (request, response) => {
   response.json(
     await getMasterData(request.portfolioContext.ownerUserId, {
       createIfMissing: request.portfolioContext.isOwner,
@@ -2541,7 +2983,7 @@ app.get('/api/master-data', requireAuth, resolvePortfolioContext, async (request
   )
 })
 
-app.get('/api/tax-estimation', requireAuth, resolvePortfolioContext, async (request, response) => {
+app.get('/api/tax-estimation', requireAuth, validateRequest(taxQuerySchema, 'query'), resolvePortfolioContext, async (request, response) => {
   const fy = parseFinancialYearLabel(String(request.query.fy || ''))
   const [deposits, masterData] = await Promise.all([
     Deposit.find({ ownerUserId: request.portfolioContext.ownerUserId, isDeleted: { $ne: true } }).lean(),
@@ -2561,9 +3003,12 @@ app.get('/api/tax-estimation', requireAuth, resolvePortfolioContext, async (requ
 
 app.put(
   '/api/master-data',
+  writeRateLimiter,
   requireAuth,
+  validateRequest(ownerScopedQuerySchema, 'query'),
   resolvePortfolioContext,
   requirePortfolioWriteAccess,
+  validateRequest(masterDataBodySchema),
   async (request, response) => {
     const normalized = normalizeMasterData(request.body || {})
     const previous = await MasterData.findOne({
@@ -2658,9 +3103,10 @@ app.put(
   },
 )
 
-app.post('/api/deposits', requireAuth, resolvePortfolioContext, requirePortfolioWriteAccess, async (request, response) => {
+app.post('/api/deposits', writeRateLimiter, requireAuth, validateRequest(ownerScopedQuerySchema, 'query'), resolvePortfolioContext, requirePortfolioWriteAccess, validateRequest(depositWriteBodySchema), async (request, response) => {
+  const depositPayload = sanitizeDepositWritePayload(request.body)
   const created = await Deposit.create({
-    ...request.body,
+    ...depositPayload,
     ownerUserId: request.portfolioContext.ownerUserId,
     createdByUserId: request.sessionUser.id,
     updatedByUserId: request.sessionUser.id,
@@ -2678,7 +3124,7 @@ app.post('/api/deposits', requireAuth, resolvePortfolioContext, requirePortfolio
   response.status(201).json(normalizeDepositDoc(created.toObject()))
 })
 
-app.put('/api/deposits/:id', requireAuth, resolvePortfolioContext, requirePortfolioWriteAccess, async (request, response) => {
+app.put('/api/deposits/:id', writeRateLimiter, requireAuth, validateRequest(idParamSchema, 'params'), validateRequest(ownerScopedQuerySchema, 'query'), resolvePortfolioContext, requirePortfolioWriteAccess, validateRequest(depositWriteBodySchema), async (request, response) => {
   const existing = await Deposit.findOne(
     buildUpdateQuery(request.params.id, request.portfolioContext.ownerUserId),
   ).lean()
@@ -2691,7 +3137,7 @@ app.put('/api/deposits/:id', requireAuth, resolvePortfolioContext, requirePortfo
   const updated = await Deposit.findOneAndUpdate(
     buildUpdateQuery(request.params.id, request.portfolioContext.ownerUserId),
     {
-      ...request.body,
+      ...sanitizeDepositWritePayload(request.body),
       ownerUserId: request.portfolioContext.ownerUserId,
       updatedByUserId: request.sessionUser.id,
     },
@@ -2711,7 +3157,7 @@ app.put('/api/deposits/:id', requireAuth, resolvePortfolioContext, requirePortfo
   response.json(normalizeDepositDoc(updated))
 })
 
-app.post('/api/deposits/:id/archive', requireAuth, resolvePortfolioContext, requirePortfolioWriteAccess, async (request, response) => {
+app.post('/api/deposits/:id/archive', writeRateLimiter, requireAuth, validateRequest(idParamSchema, 'params'), validateRequest(ownerScopedQuerySchema, 'query'), resolvePortfolioContext, requirePortfolioWriteAccess, async (request, response) => {
   const existing = await Deposit.findOne(
     buildUpdateQuery(request.params.id, request.portfolioContext.ownerUserId),
   ).lean()
@@ -2769,7 +3215,10 @@ app.post('/api/deposits/:id/archive', requireAuth, resolvePortfolioContext, requ
 
 app.delete(
   '/api/deposits/:id',
+  backupRestoreRateLimiter,
   requireAuth,
+  validateRequest(idParamSchema, 'params'),
+  validateRequest(ownerScopedQuerySchema, 'query'),
   resolvePortfolioContext,
   requireAdmin,
   async (request, response) => {
@@ -2813,10 +3262,21 @@ app.delete(
 app.get(
   '/api/admin/export-data',
   requireAuth,
+  validateRequest(ownerScopedQuerySchema, 'query'),
   resolvePortfolioContext,
   requireAdmin,
   async (request, response) => {
     const deposits = await Deposit.find({ ownerUserId: request.portfolioContext.ownerUserId }).lean()
+    await writeAdminAuditLog({
+      actor: request.sessionUser,
+      action: 'admin.exportData.download',
+      targetType: 'portfolioExport',
+      targetRecordId: request.portfolioContext.ownerUserId,
+      targetOwnerUserId: request.portfolioContext.ownerUserId,
+      metadata: {
+        depositCount: deposits.length,
+      },
+    })
     response.json({
       deposits: deposits.map(normalizeDepositDoc),
     })
@@ -2826,6 +3286,7 @@ app.get(
 app.get(
   '/api/data-backup/export',
   requireAuth,
+  validateRequest(ownerScopedQuerySchema, 'query'),
   resolvePortfolioContext,
   requirePortfolioWriteAccess,
   async (request, response) => {
@@ -2855,7 +3316,9 @@ app.get(
 
 app.post(
   '/api/data-backup/preview',
+  importRateLimiter,
   requireAuth,
+  validateRequest(ownerScopedQuerySchema, 'query'),
   resolvePortfolioContext,
   requirePortfolioWriteAccess,
   importUpload.single('file'),
@@ -2887,7 +3350,9 @@ app.post(
 
 app.post(
   '/api/data-backup/restore',
+  backupRestoreRateLimiter,
   requireAuth,
+  validateRequest(ownerScopedQuerySchema, 'query'),
   resolvePortfolioContext,
   requirePortfolioWriteAccess,
   importUpload.single('file'),
@@ -2935,9 +3400,7 @@ app.post(
       await Deposit.deleteMany({ ownerUserId: request.portfolioContext.ownerUserId }, { session })
 
       const restoredDeposits = validation.snapshot.deposits.map((deposit) => {
-        const snapshot = { ...deposit }
-        delete snapshot._id
-        delete snapshot.ownerUserId
+        const snapshot = sanitizeRestoredDepositPayload(deposit)
 
         return {
           ...snapshot,
@@ -3000,10 +3463,37 @@ app.post(
 
 // Express recognizes error middleware only when all 4 parameters are present.
 // eslint-disable-next-line no-unused-vars
-app.use((error, _request, response, _next) => {
-  console.error(error)
-  response.status(500).json({
-    message: error?.message || 'Unexpected server error',
+app.use((error, request, response, _next) => {
+  const requestId = request.requestId || crypto.randomUUID()
+  const isValidationError = error instanceof ZodError
+  const isCorsError = error?.message === 'CORS origin not allowed'
+  const statusCode = isValidationError ? 400 : isCorsError ? 403 : Number(error?.statusCode || 500)
+  const safeStatusCode = statusCode >= 400 && statusCode < 600 ? statusCode : 500
+
+  console.error('Request failed', {
+    requestId,
+    method: request.method,
+    path: request.originalUrl,
+    statusCode: safeStatusCode,
+    message: error?.message,
+    stack: error?.stack,
+  })
+
+  if (isValidationError) {
+    response.status(400).json({
+      message: 'Request validation failed',
+      requestId,
+      issues: error.issues.map((issue) => ({
+        path: issue.path.join('.'),
+        message: issue.message,
+      })),
+    })
+    return
+  }
+
+  response.status(safeStatusCode).json({
+    message: safeStatusCode === 403 ? 'Request is not allowed' : 'Unexpected server error',
+    requestId,
   })
 })
 
@@ -3014,7 +3504,11 @@ const start = async () => {
   })
 }
 
-start().catch((error) => {
-  console.error('Failed to start server', error)
-  process.exit(1)
-})
+if (process.env.NODE_ENV !== 'test' && process.env.SERVER_DISABLE_START !== 'true') {
+  start().catch((error) => {
+    console.error('Failed to start server', error)
+    process.exit(1)
+  })
+}
+
+export default app

@@ -32,7 +32,7 @@ export default function AuthView({ onAuthenticate, error, isAuthenticating, them
           initializedGoogleClientId = googleClientId
         }
 
-        buttonRef.current.innerHTML = ''
+        buttonRef.current.replaceChildren()
         globalThis.google.accounts.id.renderButton(buttonRef.current, {
           theme: 'outline',
           size: 'large',
