@@ -2374,7 +2374,7 @@ function App() {
     maturityDateFrom !== '' ||
     maturityDateTo !== '' ||
     !showClosed
-  const mobileCompactHeaderTitle = 'Your fixed-income command center'
+  const mobileCompactHeaderTitle = 'FIXED INCOME PORTFOLIO TRACKER'
   const mobileFilterBadges = [
     searchScope !== 'all' ? `Scope: ${searchScope === 'holder'
       ? 'Holder'

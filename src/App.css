@@ -381,9 +381,12 @@
 }
 
 .app-topbar-subtitle {
-  font-size: 0.82rem;
-  color: var(--text-subtle);
-  line-height: 1.2;
+  font-size: 0.74rem;
+  color: var(--text-primary);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1.25;
+  opacity: 0.9;
 }
 
 .topbar-avatar {
@@ -3754,8 +3757,11 @@
   }
 
   .app-topbar-subtitle {
-    font-size: 0.74rem;
-    color: var(--text-subtle);
+    font-size: 0.66rem;
+    color: var(--text-primary);
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    opacity: 0.9;
   }
 
   .mobile-hero-strip {
