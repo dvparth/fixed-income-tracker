@@ -107,6 +107,34 @@ function PrivacyPolicyView({ themeClass }) {
             </section>
 
             <section className="privacy-section">
+              <h2>Data retention and deletion</h2>
+              <p>
+                Portfolio records and backup snapshots are retained only to operate the product
+                features you use. You can delete portfolio entries in the application and remove
+                backup files from your Google Drive at any time. Deleting a local browser profile,
+                exported backup file, or Drive backup may permanently remove access to that data.
+              </p>
+            </section>
+
+            <section className="privacy-section">
+              <h2>Security and risk notice</h2>
+              <p>
+                YieldFlow applies reasonable technical safeguards for authentication and authorized
+                access workflows; however, no system can guarantee absolute security against every
+                threat. You should protect your Google account, keep independent copies of critical
+                records, and promptly revoke access if you suspect unauthorized use.
+              </p>
+            </section>
+
+            <section className="privacy-section">
+              <h2>Policy updates</h2>
+              <p>
+                This policy may be updated as features or legal requirements change. Material
+                updates will be reflected by the "Last updated" date shown on this page.
+              </p>
+            </section>
+
+            <section className="privacy-section">
               <h2>Contact</h2>
               <p>
                 For questions about this policy or data usage, contact Parth Dave at{' '}
@@ -193,11 +221,48 @@ function TermsOfServiceView({ themeClass }) {
             </section>
 
             <section className="privacy-section">
-              <h2>Limitation of responsibility</h2>
+              <h2>Disclaimer of warranties</h2>
               <p>
-                YieldFlow is provided as a financial record management tool. To the extent permitted
-                by law, the service is provided without guarantees of uninterrupted operation or
-                suitability for every institution-specific financial product rule.
+                YieldFlow is provided "as is" and "as available." To the maximum extent permitted
+                by law, no express or implied warranties are made, including warranties of
+                merchantability, fitness for a particular purpose, non-infringement, accuracy,
+                availability, or error-free operation.
+              </p>
+            </section>
+
+            <section className="privacy-section">
+              <h2>Limitation of liability</h2>
+              <p>
+                To the extent permitted by law, YieldFlow and its operator are not liable for any
+                indirect, incidental, special, consequential, exemplary, or punitive damages, or
+                for loss of profits, revenue, data, goodwill, or business interruption arising from
+                use of (or inability to use) the service.
+              </p>
+            </section>
+
+            <section className="privacy-section">
+              <h2>User safeguards and duty to verify</h2>
+              <p>
+                You are solely responsible for maintaining independent records, verifying all
+                calculations and maturity outcomes, and obtaining professional advice before acting
+                on any financial or tax information.
+              </p>
+            </section>
+
+            <section className="privacy-section">
+              <h2>Indemnity</h2>
+              <p>
+                You agree to indemnify and hold harmless the service operator from claims,
+                liabilities, damages, losses, and expenses arising from your misuse of the service,
+                violation of these terms, or violation of applicable law.
+              </p>
+            </section>
+
+            <section className="privacy-section">
+              <h2>Changes to terms</h2>
+              <p>
+                These terms may be updated from time to time. Continued use of YieldFlow after
+                updates are published constitutes acceptance of the revised terms.
               </p>
             </section>
 
