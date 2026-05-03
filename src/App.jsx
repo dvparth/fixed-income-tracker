@@ -941,7 +941,7 @@ function App() {
   }, [activeDeposits, deferredSearch, investmentDateFrom, investmentDateTo, maturityDateFrom, maturityDateTo, ownerAliasLookup, searchScope, showClosed])
 
   const selectedDeposit =
-    filteredDeposits.find((deposit) => deposit.id === selectedId) ?? null
+    activeDeposits.find((deposit) => deposit.id === selectedId) ?? null
 
   const selectedInterestEvents = useMemo(
     () => (selectedDeposit ? generateInterestEvents(selectedDeposit) : []),
@@ -1537,6 +1537,10 @@ function App() {
   const openDepositDrilldown = (depositId, searchTextValue = '') => {
     setSearchScope('all')
     setSearchText(String(searchTextValue || '').trim())
+    const targetDeposit = activeDeposits.find((deposit) => deposit.id === depositId)
+    if (targetDeposit?.status === 'Closed') {
+      setShowClosed(true)
+    }
     setSelectedId(depositId)
     setMobileDepositsScreen('detail')
     setMobileDetailSections({

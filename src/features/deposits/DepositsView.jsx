@@ -119,20 +119,17 @@ export default function DepositsView({
     [filteredDeposits, investmentTypeFilter, ownerFilter],
   )
 
-  const detailDeposit =
-    selectedDeposit && viewFilteredDeposits.some((deposit) => deposit.id === selectedDeposit.id)
-      ? selectedDeposit
-      : null
+  const detailDeposit = selectedDeposit ?? null
 
   useEffect(() => {
     if (!selectedId) {
       return
     }
 
-    if (!viewFilteredDeposits.some((deposit) => deposit.id === selectedId)) {
+    if (!selectedDeposit) {
       setSelectedId(null)
     }
-  }, [selectedId, setSelectedId, viewFilteredDeposits])
+  }, [selectedDeposit, selectedId, setSelectedId])
 
   const groupedDeposits = useMemo(() => {
     const groupMap = new Map()
