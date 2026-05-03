@@ -8,6 +8,7 @@ import mongoose from 'mongoose'
 import multer from 'multer'
 import * as XLSX from 'xlsx'
 import { z, ZodError } from 'zod'
+import { DEFAULT_DEMO_OWNER_ID, DEMO_PORTFOLIO_LABEL } from '../shared/demoPortfolio.js'
 import { generateOwnerWiseFYTaxSummary, parseFinancialYearLabel } from '../shared/fyTaxEngine.js'
 import { INVESTMENT_IMPORT_REQUIRED_COLUMNS, INVESTMENT_IMPORT_SHEET_NAME } from '../shared/investmentImport.js'
 import { emptyMasterData, normalizeMasterData } from '../shared/masterData.js'
@@ -102,6 +103,12 @@ const BACKUP_RESTORE_RATE_LIMIT_MAX = Math.floor(
 )
 const HEALTH_DETAIL_TOKEN = String(process.env.SERVER_HEALTH_DETAIL_TOKEN || '').trim()
 const CSRF_STRICT_ORIGIN = parseBooleanEnv(process.env.SERVER_CSRF_STRICT_ORIGIN, true)
+const DEMO_ENABLED = parseBooleanEnv(process.env.SERVER_DEMO_ENABLED, !isProduction)
+const DEMO_OWNER_ID =
+  String(process.env.SERVER_DEMO_OWNER_ID || '').trim() || DEFAULT_DEMO_OWNER_ID
+const DEMO_RATE_LIMIT_MAX = Math.floor(
+  parsePositiveNumberEnv(process.env.SERVER_DEMO_RATE_LIMIT_MAX, 120),
+)
 const HIGH_RISK_ACTIONS = new Set([
   'admin.investment.delete',
   'admin.backup.restore',
@@ -2531,6 +2538,10 @@ const backupRestoreRateLimiter = createSecurityRateLimiter({
   name: 'backup-restore',
   max: BACKUP_RESTORE_RATE_LIMIT_MAX,
 })
+const demoRateLimiter = createSecurityRateLimiter({
+  name: 'demo',
+  max: DEMO_RATE_LIMIT_MAX,
+})
 
 const validateHealthDetailAccess = (request, response, next) => {
   const suppliedToken = String(request.headers['x-health-token'] || request.query.token || '').trim()
@@ -2613,6 +2624,59 @@ app.get(
   (_request, response) => {
     const payload = buildDetailedHealthPayload()
     response.status(payload.ok ? 200 : 503).json(payload)
+  },
+)
+
+const requireDemoEnabled = (_request, response, next) => {
+  if (!DEMO_ENABLED) {
+    response.status(404).json({ message: 'Not found' })
+    return
+  }
+
+  next()
+}
+
+const loadDemoPortfolioSnapshot = async () => {
+  const [deposits, masterData] = await Promise.all([
+    Deposit.find({ ownerUserId: DEMO_OWNER_ID }).lean(),
+    getMasterData(DEMO_OWNER_ID, { createIfMissing: false }),
+  ])
+  const normalizedMasterData = normalizeMasterData(masterData)
+  const normalizedDeposits = deposits.map((deposit) =>
+    canonicalizeDepositAgainstMasterData(normalizeDepositDoc(deposit), normalizedMasterData),
+  )
+
+  return {
+    portfolio: {
+      ownerUserId: DEMO_OWNER_ID,
+      label: DEMO_PORTFOLIO_LABEL,
+      mode: 'demo',
+    },
+    deposits: normalizedDeposits,
+    masterData: normalizedMasterData,
+  }
+}
+
+app.get('/api/demo/portfolio', demoRateLimiter, requireDemoEnabled, async (_request, response) => {
+  response.json(await loadDemoPortfolioSnapshot())
+})
+
+app.get(
+  '/api/demo/tax-estimation',
+  demoRateLimiter,
+  requireDemoEnabled,
+  validateRequest(z.object({ fy: z.string().trim().min(1).max(12).optional() }).strict(), 'query'),
+  async (request, response) => {
+    const fy = parseFinancialYearLabel(String(request.query.fy || ''))
+    const snapshot = await loadDemoPortfolioSnapshot()
+    const activeDemoDeposits = snapshot.deposits.filter((deposit) => !deposit.isDeleted)
+    const summary = generateOwnerWiseFYTaxSummary(
+      activeDemoDeposits.map((deposit) => buildTaxEstimationInvestmentInput(deposit)),
+      fy,
+      snapshot.masterData.owners || [],
+    )
+
+    response.json(summary)
   },
 )
 

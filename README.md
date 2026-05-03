@@ -103,12 +103,13 @@ Frontend runs on Vite and proxies `/api` requests to the Express backend.
 - `npm.cmd run lint` - run ESLint
 - `npm.cmd test` - run API and financial logic tests
 - `npm.cmd audit` - run npm dependency audit
+- `npm.cmd run seed:demo` - seed the public read-only demo portfolio in MongoDB
 
 ## Architecture Notes
 
 - The frontend is being split into feature-oriented modules so the app can scale beyond a single `App.jsx`.
 - Funding references use stable event identifiers such as `maturity:<depositId>` and `interest:<depositId>:<yyyy-mm-dd>`.
-- The app now operates against stored data only, with no in-memory demo fallback.
+- The main app operates against stored authenticated data; `/demo` loads a seeded public portfolio and keeps visitor edits in browser memory only.
 - Reference values such as owners, funding sources, institutions, branches, and instrument types now flow through a shared master-data model.
 - MongoDB collections are isolated for this application in a dedicated YieldFlow database: `investments`, `masterData`, `users`, `sessions`, `portfolioShares`, and `auditLogs`.
 - State-changing API requests are protected by strict Origin/Referer checks, request schemas deny unknown fields before writes, and production startup requires `SERVER_ALLOWED_ORIGINS`.
@@ -116,6 +117,7 @@ Frontend runs on Vite and proxies `/api` requests to the Express backend.
 - Audit logs store scoped action metadata and high-risk markers instead of routine full before/after snapshots.
 - v2 admin controls should add MFA, just-in-time elevation, high-risk action alerts, and audit retention cleanup jobs.
 - React user data should remain text-rendered; do not introduce `dangerouslySetInnerHTML` without a dedicated sanitizer and review.
+- Public demo endpoints are disabled unless `SERVER_DEMO_ENABLED=true`; seed them with `SERVER_DEMO_OWNER_ID` before publishing `/demo`.
 
 ## Roadmap
 
