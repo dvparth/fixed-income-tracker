@@ -289,6 +289,44 @@
   flex-shrink: 0;
 }
 
+
+.app-topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.app-logo {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  filter: drop-shadow(0 4px 10px rgba(10, 37, 64, 0.18));
+}
+
+.app-topbar-title span {
+  background: linear-gradient(135deg, #1DB88D, #1E4B7A);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.hero-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.hero-logo {
+  width: 56px;
+  height: 56px;
+  filter: drop-shadow(0 10px 18px var(--shadow-color));
+}
+
+.hero-title {
+  margin: 0;
+}
+
 .topbar-tab-bar {
   justify-content: flex-start;
   align-items: center;
