@@ -40,6 +40,10 @@ const cookieSecure =
     : String(process.env.SERVER_COOKIE_SECURE || '').trim().toLowerCase() === 'false'
       ? false
       : process.env.NODE_ENV === 'production'
+const parsePositiveNumberEnv = (value, fallback) => {
+  const number = Number(value)
+  return Number.isFinite(number) && number > 0 ? number : fallback
+}
 
 if (!mongoUri) {
   throw new Error('SERVER_MONGO_URI is missing from the environment')
@@ -53,12 +57,19 @@ if (!sessionSecret) {
   throw new Error('SERVER_SESSION_SECRET is missing from the environment')
 }
 
-const SESSION_COOKIE_NAME = 'yieldflow_session'
-const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30
+const SESSION_COOKIE_NAME =
+  String(process.env.SERVER_SESSION_COOKIE_NAME || '').trim() || 'yieldflow_session'
+const SESSION_TTL_MS =
+  1000 * 60 * 60 * 24 * parsePositiveNumberEnv(process.env.SERVER_SESSION_TTL_DAYS, 30)
+const UPLOAD_MAX_BYTES =
+  1024 * 1024 * parsePositiveNumberEnv(process.env.SERVER_UPLOAD_MAX_MB, 5)
+const BACKUP_PREVIEW_ROW_LIMIT = Math.floor(
+  parsePositiveNumberEnv(process.env.SERVER_BACKUP_PREVIEW_ROW_LIMIT, 8),
+)
 const importUpload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 1024 * 1024 * 5,
+    fileSize: UPLOAD_MAX_BYTES,
   },
 })
 const normalizedCookieSameSite =
@@ -1240,7 +1251,7 @@ const validateBackupSnapshot = ({ metadataRows, masterData, deposits }) => {
     rowErrors,
     parsedRowCount: deposits.length,
     validRowCount: parsedDeposits.filter((entry) => entry.errors.length === 0).length,
-    previewRows: parsedDeposits.slice(0, 8).map((entry) => ({
+    previewRows: parsedDeposits.slice(0, BACKUP_PREVIEW_ROW_LIMIT).map((entry) => ({
       rowNumber: entry.rowNumber,
       investment: entry.investment,
       errors: entry.errors,

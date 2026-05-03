@@ -35,8 +35,18 @@ const parseDownloadFilename = (contentDisposition, fallback) => {
   }
 }
 
-const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file'
-const GOOGLE_DRIVE_APP_FOLDER_NAME = 'YieldFlow Backups'
+const GOOGLE_DRIVE_SCOPE =
+  String(import.meta.env.VITE_GOOGLE_DRIVE_SCOPE || '').trim() ||
+  'https://www.googleapis.com/auth/drive.file'
+const GOOGLE_DRIVE_APP_FOLDER_NAME =
+  String(import.meta.env.VITE_GOOGLE_DRIVE_BACKUP_FOLDER_NAME || '').trim() ||
+  'YieldFlow Backups'
+const GOOGLE_DRIVE_API_PAGE_SIZE = (() => {
+  const number = Number(import.meta.env.VITE_GOOGLE_DRIVE_API_PAGE_SIZE)
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : 10
+})()
+const DEFAULT_BACKUP_DESTINATION =
+  String(import.meta.env.VITE_DEFAULT_BACKUP_DESTINATION || '').trim() || 'local'
 
 const escapeDriveQueryValue = (value) => String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'")
 const sanitizeFilenamePart = (value) =>
@@ -77,7 +87,7 @@ export default function BackupRestorePanel({
   const [isRestoring, setIsRestoring] = useState(false)
   const [confirmReplace, setConfirmReplace] = useState(false)
   const [isRestoreConfirmOpen, setIsRestoreConfirmOpen] = useState(false)
-  const [backupDestination, setBackupDestination] = useState('local')
+  const [backupDestination, setBackupDestination] = useState(DEFAULT_BACKUP_DESTINATION)
   const [driveLink, setDriveLink] = useState('')
 
   const canRestore = Boolean(selectedFile && previewResult && !previewResult.hasErrors && confirmReplace && !isReadOnly)
@@ -132,7 +142,7 @@ export default function BackupRestorePanel({
 
     const search = await driveApiRequest({
       accessToken,
-      url: `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,webViewLink)&pageSize=10`,
+      url: `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,webViewLink)&pageSize=${GOOGLE_DRIVE_API_PAGE_SIZE}`,
     })
 
     if (Array.isArray(search.files) && search.files.length > 0) {
@@ -160,7 +170,7 @@ export default function BackupRestorePanel({
 
     const search = await driveApiRequest({
       accessToken,
-      url: `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,webViewLink,modifiedTime)&pageSize=10`,
+      url: `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name,webViewLink,modifiedTime)&pageSize=${GOOGLE_DRIVE_API_PAGE_SIZE}`,
     })
 
     return Array.isArray(search.files) && search.files.length > 0 ? search.files[0] : null
@@ -326,6 +336,10 @@ export default function BackupRestorePanel({
   }
 
   const handleRestore = async () => {
+    if (!canRestore || isRestoring) {
+      return
+    }
+
     try {
       setIsRestoring(true)
       setFeedback(null)
@@ -567,7 +581,11 @@ export default function BackupRestorePanel({
                 <button
                   type="button"
                   className="primary-btn compact-btn"
-                  onClick={() => setIsRestoreConfirmOpen(true)}
+                  onClick={() => {
+                    if (canRestore) {
+                      setIsRestoreConfirmOpen(true)
+                    }
+                  }}
                   disabled={!canRestore || isRestoring}
                 >
                   Continue to restore
@@ -623,7 +641,7 @@ export default function BackupRestorePanel({
                 type="button"
                 className="primary-btn compact-btn"
                 onClick={handleRestore}
-                disabled={isRestoring}
+                disabled={!canRestore || isRestoring}
               >
                 {isRestoring ? 'Restoring...' : 'Restore Data'}
               </button>

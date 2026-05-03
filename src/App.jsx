@@ -16,9 +16,20 @@ const ADD_NEW_MASTER_VALUE = '__add_new_master__'
 const THEME_STORAGE_KEY = 'yieldflow.theme'
 const AUTHOR_LINKEDIN_URL = 'https://www.linkedin.com/in/parthdave2'
 const APP_HOME_URL = 'https://getyieldflow.netlify.app'
-const SESSION_WARNING_MS = 55 * 60 * 1000
-const SESSION_TIMEOUT_MS = 60 * 60 * 1000
-const SESSION_ACTIVITY_THROTTLE_MS = 15000
+const parsePositiveEnvNumber = (key, fallback) => {
+  const number = Number(import.meta.env[key])
+  return Number.isFinite(number) && number > 0 ? number : fallback
+}
+const SESSION_WARNING_MS = parsePositiveEnvNumber('VITE_SESSION_WARNING_MINUTES', 55) * 60 * 1000
+const SESSION_TIMEOUT_MS = parsePositiveEnvNumber('VITE_SESSION_TIMEOUT_MINUTES', 60) * 60 * 1000
+const SESSION_ACTIVITY_THROTTLE_MS =
+  parsePositiveEnvNumber('VITE_SESSION_ACTIVITY_THROTTLE_SECONDS', 15) * 1000
+const DASHBOARD_PREVIEW_LIMIT = Math.floor(
+  parsePositiveEnvNumber('VITE_DASHBOARD_PREVIEW_LIMIT', 3),
+)
+const DASHBOARD_UPCOMING_CASH_WINDOW_DAYS = Math.floor(
+  parsePositiveEnvNumber('VITE_DASHBOARD_UPCOMING_CASH_WINDOW_DAYS', 30),
+)
 const createEmptySessionState = () => ({
   authenticated: false,
   user: null,
@@ -1013,7 +1024,7 @@ function App() {
       (sum, deposit) => sum + Number(deposit.principalAmount || 0),
       0,
     )
-    const nextThirtyDayCutoff = addDays(TODAY, 30)
+    const nextCashWindowCutoff = addDays(TODAY, DASHBOARD_UPCOMING_CASH_WINDOW_DAYS)
     const upcomingMaturities = [...openDeposits]
       .sort((left, right) => getDateSortValue(left.maturityDate) - getDateSortValue(right.maturityDate))
     const realisedInterest = closedDeposits
@@ -1067,7 +1078,7 @@ function App() {
     )
     const upcomingCashFlowNext30Days = dashboardScopedCashFlowEvents.filter((event) => {
       const eventDate = new Date(event.date)
-      return eventDate >= TODAY && eventDate <= nextThirtyDayCutoff
+      return eventDate >= TODAY && eventDate <= nextCashWindowCutoff
     })
     const maturingSoonDeposits = openDeposits
       .filter((deposit) => {
@@ -1076,7 +1087,7 @@ function App() {
         }
 
         const maturityDate = new Date(`${deposit.maturityDate}T00:00:00`)
-        return maturityDate >= TODAY && maturityDate <= nextThirtyDayCutoff
+        return maturityDate >= TODAY && maturityDate <= nextCashWindowCutoff
       })
       .sort((left, right) => getDateSortValue(left.maturityDate) - getDateSortValue(right.maturityDate))
     const uninvestedInterestCash = dueInterestEvents.reduce((sum, event) => {
@@ -1279,7 +1290,7 @@ function App() {
 
   const visibleMaturityDashboardItems = showAllMaturityItems
     ? maturityDashboardItems
-    : maturityDashboardItems.slice(0, 3)
+    : maturityDashboardItems.slice(0, DASHBOARD_PREVIEW_LIMIT)
 
   const interestDashboardItems =
     interestFocusMode === 'pending'
@@ -1288,7 +1299,7 @@ function App() {
 
   const visibleInterestDashboardItems = showAllInterestItems
     ? interestDashboardItems
-    : interestDashboardItems.slice(0, 3)
+    : interestDashboardItems.slice(0, DASHBOARD_PREVIEW_LIMIT)
 
   const selectedReinvestmentSummary = selectedDeposit
     ? (() => {
@@ -3221,7 +3232,7 @@ function App() {
                 <span className="eyebrow">FY {selectedFinancialYear}</span>
                 <strong>{formatCurrency(dashboardTaxHighlights.totalTaxableInterest)}</strong>
                 <p>
-                  {`Cash in next 30 days ${formatCurrency(stats.upcomingCashNext30Days)}`}
+                  {`Cash in next ${DASHBOARD_UPCOMING_CASH_WINDOW_DAYS} days ${formatCurrency(stats.upcomingCashNext30Days)}`}
                   {' | '}
                   {`Maturing soon ${stats.maturingSoonCount} ${stats.maturingSoonCount === 1 ? 'deposit' : 'deposits'}`}
                 </p>
@@ -3275,7 +3286,7 @@ function App() {
                   </p>
                 </div>
                 <div className="section-head-actions">
-                  {maturityDashboardItems.length > 3 ? (
+                {maturityDashboardItems.length > DASHBOARD_PREVIEW_LIMIT ? (
                     <button
                       type="button"
                       className="secondary-btn compact ghost-btn dashboard-toggle-btn"
@@ -3357,7 +3368,7 @@ function App() {
                   </p>
                 </div>
                 <div className="section-head-actions">
-                  {interestDashboardItems.length > 3 ? (
+                {interestDashboardItems.length > DASHBOARD_PREVIEW_LIMIT ? (
                     <button
                       type="button"
                       className="secondary-btn compact ghost-btn dashboard-toggle-btn"
@@ -3704,7 +3715,11 @@ function App() {
             <div className="section-head">
               <div>
                 <h2 id="session-warning-title">Session expiring soon</h2>
-                <p>Your session will expire in 5 minutes due to inactivity.</p>
+                <p>
+                  Your session will expire in{' '}
+                  {Math.max(Math.round((SESSION_TIMEOUT_MS - SESSION_WARNING_MS) / 60000), 1)}{' '}
+                  minutes due to inactivity.
+                </p>
               </div>
             </div>
             <div className="backup-warning-card">

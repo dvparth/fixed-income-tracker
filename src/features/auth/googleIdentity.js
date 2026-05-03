@@ -1,5 +1,11 @@
-const GOOGLE_SCRIPT_SRC = 'https://accounts.google.com/gsi/client'
+const GOOGLE_SCRIPT_SRC =
+  String(import.meta.env.VITE_GOOGLE_IDENTITY_SCRIPT_URL || '').trim() ||
+  'https://accounts.google.com/gsi/client'
 const GOOGLE_TOKEN_STORAGE_PREFIX = 'yieldflow.google-token'
+const GOOGLE_ACCESS_TOKEN_REFRESH_SKEW_SECONDS = (() => {
+  const number = Number(import.meta.env.VITE_GOOGLE_ACCESS_TOKEN_REFRESH_SKEW_SECONDS)
+  return Number.isFinite(number) && number > 0 ? number : 60
+})()
 
 let googleScriptPromise = null
 const googleTokenCache = new Map()
@@ -111,7 +117,10 @@ const requestGoogleAccessTokenOnce = ({ clientId, scope, prompt, cacheKey, login
 
         const expiresInSeconds = Number(response.expires_in || 0)
         const expiresAt =
-          expiresInSeconds > 0 ? Date.now() + Math.max(expiresInSeconds - 60, 0) * 1000 : Date.now()
+          expiresInSeconds > 0
+            ? Date.now() +
+              Math.max(expiresInSeconds - GOOGLE_ACCESS_TOKEN_REFRESH_SKEW_SECONDS, 0) * 1000
+            : Date.now()
 
         const tokenEntry = {
           accessToken: response.access_token,

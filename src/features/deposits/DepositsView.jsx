@@ -3,6 +3,16 @@ import BulkImportPanel from '../import/BulkImportPanel.jsx'
 import { formatInterestRate, generateInterestEvents, getCalculationFrequencyLabel } from './depositModel.js'
 
 const SHOW_BULK_IMPORT = false
+const parsePositiveEnvNumber = (key, fallback) => {
+  const number = Number(import.meta.env[key])
+  return Number.isFinite(number) && number > 0 ? number : fallback
+}
+const DEPOSIT_MATURING_SOON_WINDOW_DAYS = Math.floor(
+  parsePositiveEnvNumber('VITE_DEPOSIT_MATURING_SOON_WINDOW_DAYS', 45),
+)
+const DEPOSIT_GROUP_SECTION_LIMIT = Math.floor(
+  parsePositiveEnvNumber('VITE_DEPOSIT_GROUP_SECTION_LIMIT', 5),
+)
 
 export default function DepositsView({
   isMobile,
@@ -202,7 +212,7 @@ export default function DepositsView({
 
   const statusGroupedDeposits = useMemo(() => {
     const upcomingCutoff = new Date(todayTime)
-    upcomingCutoff.setDate(upcomingCutoff.getDate() + 45)
+    upcomingCutoff.setDate(upcomingCutoff.getDate() + DEPOSIT_MATURING_SOON_WINDOW_DAYS)
     const getMaturitySortValue = (group) => {
       if (!group.nextMaturityDate) {
         return Number.MAX_SAFE_INTEGER
@@ -908,20 +918,24 @@ export default function DepositsView({
             <h3>Deposits by status</h3>
             <p>Open the bucket you want to work on next.</p>
           </div>
-          {groupedDeposits.length > 5 ? (
+          {groupedDeposits.length > DEPOSIT_GROUP_SECTION_LIMIT ? (
             <button
               type="button"
               className="secondary-btn compact ghost-btn"
               onClick={() => setShowAllDepositGroups((current) => !current)}
             >
-              {showAllDepositGroups ? 'Show top 5 in each section' : 'View more groups'}
+              {showAllDepositGroups
+                ? `Show top ${DEPOSIT_GROUP_SECTION_LIMIT} in each section`
+                : 'View more groups'}
             </button>
           ) : null}
         </div>
         <div className="deposit-status-stack">
           {statusGroupedDeposits.map((section) => {
             const isExpanded = Boolean(expandedStatusSections[section.key])
-            const visibleGroups = showAllDepositGroups ? section.groups : section.groups.slice(0, 5)
+            const visibleGroups = showAllDepositGroups
+              ? section.groups
+              : section.groups.slice(0, DEPOSIT_GROUP_SECTION_LIMIT)
 
             return (
               <article key={section.key} className="deposit-status-card">
