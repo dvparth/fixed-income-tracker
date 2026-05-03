@@ -2374,16 +2374,7 @@ function App() {
     maturityDateFrom !== '' ||
     maturityDateTo !== '' ||
     !showClosed
-  const mobileCompactHeaderTitle =
-    visibleActiveTab === 'dashboard'
-      ? 'Dashboard'
-      : visibleActiveTab === 'deposits'
-        ? 'Deposits'
-        : visibleActiveTab === 'masters'
-          ? mobileMastersTitle
-          : visibleActiveTab === 'admin'
-            ? mobileAdminTitle
-            : mobileEditorTitle
+  const mobileCompactHeaderTitle = 'Your fixed-income command center'
   const mobileFilterBadges = [
     searchScope !== 'all' ? `Scope: ${searchScope === 'holder'
       ? 'Holder'
