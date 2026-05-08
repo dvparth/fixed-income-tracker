@@ -1576,7 +1576,7 @@ function App() {
     holderName: deposit.holderName ?? '',
     fundingSource: deposit.fundingSource ?? '',
     instrumentType: deposit.instrumentType ?? '',
-    calculationFrequency: deposit.calculationFrequency ?? '',
+    calculationFrequency: deposit.calculationFrequency || 'QUARTERLY',
     payoutMode: getEffectivePayoutMode(deposit) ?? 'on-maturity',
     yearlyPayoutMonthDay: deposit.yearlyPayoutMonthDay ?? '',
     interestPayoutBeforeTds: deposit.interestPayoutBeforeTds ?? '',
@@ -1722,7 +1722,7 @@ function App() {
       holderName: deposit.holderName ?? '',
       fundingSource: deposit.fundingSource ?? '',
       instrumentType: deposit.instrumentType ?? '',
-      calculationFrequency: deposit.calculationFrequency ?? '',
+      calculationFrequency: deposit.calculationFrequency || 'QUARTERLY',
       payoutMode: deposit.payoutMode ?? 'on-maturity',
       yearlyPayoutMonthDay: deposit.yearlyPayoutMonthDay ?? '',
       interestPayoutBeforeTds: deposit.interestPayoutBeforeTds ?? '',
@@ -1948,6 +1948,29 @@ function App() {
   const handleMasterBoundFieldChange = (event) => {
     if (event.target.value === ADD_NEW_MASTER_VALUE) {
       openMastersForField(event.target.name)
+      return
+    }
+
+    if (event.target.name === 'bankName') {
+      const nextBankName = event.target.value
+      setFormValues((current) => ({
+        ...current,
+        bankName: nextBankName,
+        branchCity:
+          String(current.bankName || '').trim().toLowerCase() ===
+          String(nextBankName || '').trim().toLowerCase()
+            ? current.branchCity
+            : '',
+      }))
+      setFormErrors((current) => {
+        if (!current.bankName) {
+          return current
+        }
+
+        const next = { ...current }
+        delete next.bankName
+        return next
+      })
       return
     }
 
@@ -2519,16 +2542,17 @@ function App() {
     formValues.bankName,
   )
   const branchOptions = useMemo(() => {
+    const selectedBankName = String(formValues.bankName || '').trim()
+    if (!selectedBankName) {
+      return []
+    }
+
     const selectedInstitution = masterData.institutions.find(
-      (institution) => institution.name.toLowerCase() === String(formValues.bankName || '').trim().toLowerCase(),
+      (institution) => institution.name.toLowerCase() === selectedBankName.toLowerCase(),
     )
 
-    const options = selectedInstitution
-      ? selectedInstitution.branches.map((branch) => branch.name)
-      : masterData.institutions.flatMap((institution) => institution.branches.map((branch) => branch.name))
-
-    return ensureCurrentValue(options, formValues.branchCity)
-  }, [formValues.bankName, formValues.branchCity, masterData.institutions])
+    return selectedInstitution ? selectedInstitution.branches.map((branch) => branch.name) : []
+  }, [formValues.bankName, masterData.institutions])
   const instrumentTypeOptions = ensureCurrentValue(
     masterData.instrumentTypes.map((instrument) => instrument.name),
     formValues.instrumentType,

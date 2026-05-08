@@ -559,7 +559,7 @@ export default function FyTaxView({
                                           <p><span>Principal</span><strong>{formatCurrency(investment.principal)}</strong></p>
                                           <p><span>Rate</span><strong>{formatInterestRate(investment.interestRate)}</strong></p>
                                           <p><span>Taxable interest</span><strong>{formatCurrency(investment.estimatedTaxableInterest)}</strong></p>
-                                          <p><span>Calculation frequency</span><strong>{investment.calculationFrequency || getCalculationFrequencyFromAppliedRule(investment.appliedRule) || 'Auto'}</strong></p>
+                                          <p><span>Calculation frequency</span><strong>{investment.calculationFrequency || getCalculationFrequencyFromAppliedRule(investment.appliedRule) || 'QUARTERLY'}</strong></p>
                                           <p><span>Interest payout</span><strong>{formatPayoutFrequencyLabel(investment.payoutFrequency || getPayoutFrequencyFromAppliedRule(investment.appliedRule))}</strong></p>
                                         </div>
                                       </article>
@@ -678,7 +678,7 @@ export default function FyTaxView({
                                                   <p><span>Principal</span><strong>{formatCurrency(investment.principal)}</strong></p>
                                                   <p><span>Rate</span><strong>{formatInterestRate(investment.interestRate)}</strong></p>
                                                   <p><span>Taxable interest</span><strong>{formatCurrency(investment.estimatedTaxableInterest)}</strong></p>
-                                                  <p><span>Calculation frequency</span><strong>{investment.calculationFrequency || getCalculationFrequencyFromAppliedRule(investment.appliedRule) || 'Auto'}</strong></p>
+                                                  <p><span>Calculation frequency</span><strong>{investment.calculationFrequency || getCalculationFrequencyFromAppliedRule(investment.appliedRule) || 'QUARTERLY'}</strong></p>
                                                   <p><span>Interest payout</span><strong>{formatPayoutFrequencyLabel(investment.payoutFrequency || getPayoutFrequencyFromAppliedRule(investment.appliedRule))}</strong></p>
                                                 </div>
                                               </article>

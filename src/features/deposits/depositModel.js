@@ -14,7 +14,7 @@ export const emptyForm = {
   holderName: '',
   fundingSource: '',
   instrumentType: '',
-  calculationFrequency: '',
+  calculationFrequency: 'QUARTERLY',
   payoutMode: 'on-maturity',
   yearlyPayoutMonthDay: '',
   interestPayoutBeforeTds: '',
@@ -105,7 +105,7 @@ export const getCalculationFrequencyLabel = (value) => {
     case 'SIMPLE':
       return 'Simple'
     default:
-      return 'Auto (product default)'
+      return 'Quarterly'
   }
 }
 
@@ -316,7 +316,7 @@ export const hydrateDeposit = (deposit) => {
   return Object.assign(
     {
       instrumentType: '',
-      calculationFrequency: '',
+      calculationFrequency: 'QUARTERLY',
       payoutMode: 'on-maturity',
       yearlyPayoutMonthDay: '',
       interestPayoutBeforeTds: '',
@@ -331,7 +331,7 @@ export const hydrateDeposit = (deposit) => {
     deposit,
     {
       instrumentType: deposit.instrumentType || '',
-      calculationFrequency: deposit.calculationFrequency || '',
+      calculationFrequency: deposit.calculationFrequency || 'QUARTERLY',
       payoutMode: deposit.payoutMode || 'on-maturity',
       yearlyPayoutMonthDay: deposit.yearlyPayoutMonthDay || '',
       interestPayoutBeforeTds: deposit.interestPayoutBeforeTds ?? '',

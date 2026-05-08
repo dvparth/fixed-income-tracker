@@ -1,44 +1,64 @@
-# Fixed Income Tracker
+# YieldFlow / Fixed Income Tracker
 
-YieldFlow is a mobile-first full-stack app for tracking fixed deposits, SCSS positions, bond-style instruments, maturity rollovers, and interest-led reinvestment flows.
+YieldFlow is a mobile-first full-stack app for managing fixed-income portfolios: bank fixed deposits, SCSS-style positions, bonds, recurring interest payouts, maturity proceeds, reinvestment lineage, financial-year tax estimation, sharing, and backup/restore workflows.
 
-It is designed around one practical problem: fixed-income investments do not live independently. Maturity proceeds and periodic interest receipts often become the funding source for new investments, and this app helps track that lineage cleanly.
+The app is built around one practical domain problem: fixed-income investments are not isolated records. Matured principal and periodic interest often fund later investments, so YieldFlow tracks those cash events and their reuse explicitly.
 
 ## Highlights
 
-- Track bank FDs, SCSS, bonds, and similar fixed-income instruments
-- Capture maturity proceeds and periodic interest receipts as reusable cash sources
-- Link new investments back to maturity or interest funding
-- View reinvestment usage and remaining allocable cash
-- Mobile-first navigation for overview, deposits, and add/edit workflows
-- Express + MongoDB backend
+- Track FDs, SCSS, bonds, and similar fixed-income instruments.
+- Record owners, institutions, branches, instrument types, rates, maturity values, TDS, payout schedules, and notes.
+- Generate reusable cash events from maturities and periodic interest payouts.
+- Link new investments to prior maturity or interest events through allocation records.
+- View upcoming maturities, pending interest cash, owner summaries, grouped deposits, and reinvestment usage.
+- Estimate owner-wise financial-year interest, TDS, taxable interest, and additional tax liability.
+- Manage master data for owners, institutions, branches, aliases, instrument types, and owner tax slabs.
+- Sign in with Google, use cookie-backed server sessions, and share portfolios read-only with other users.
+- Export admin workbooks, import investments from Excel, and back up or restore full portfolio snapshots.
+- Use a public demo portfolio when demo mode is enabled.
 
 ## Tech Stack
 
-- React 19
-- Vite
+- React 19 + Vite
 - Express 5
 - MongoDB + Mongoose
+- Zod request validation
+- Google Identity Services
+- `xlsx` for import/export/backup workbooks
 - Plain CSS with mobile-first responsive behavior
+- Node built-in test runner + Supertest
 
 ## Project Structure
 
 ```text
 src/
-  App.jsx
-  App.css
+  App.jsx                         Main SPA shell and state orchestration
+  App.css                         Application styles
   features/
-    deposits/
-      depositModel.js
-      DepositsView.jsx
-    editor/
-      DepositEditorView.jsx
+    admin/                        Admin export UI and workbook generation
+    auth/                         Google Identity login helpers and auth view
+    deposits/                     Deposit list/detail UI and deposit domain helpers
+    editor/                       Add/edit investment form
+    import/                       Excel import panel and template generation
+    masters/                      Master data management UI
+    settings/                     Backup/restore UI, including Google Drive backup
+    sharing/                      Portfolio access management UI
+    tax/                          Financial-year tax estimate UI
 
 server/
-  index.js
+  index.js                        Express API, middleware, schemas, routes, models
 
 shared/
-  masterData.js
+  demoPortfolio.js                Public demo portfolio seed snapshot
+  fyTaxEngine.js                  Financial-year accrual and tax estimation logic
+  investmentImport.js             Import workbook sheet/column contract
+  masterData.js                   Master-data normalization and owner alias helpers
+  systemBackup.js                 Backup workbook contract
+
+tests/
+  demoMode.test.js
+  fyTaxEngine.test.js
+  securityMiddleware.test.js
 ```
 
 ## Local Setup
@@ -55,38 +75,37 @@ npm.cmd install
 Copy-Item .env.example .env
 ```
 
-3. Set the server and UI environment variables in `.env`:
+3. Configure `.env`. The usual local defaults are:
 
 ```env
 SERVER_PORT=4000
 SERVER_MONGO_URI=mongodb://localhost:27017/YieldFlow
 SERVER_GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
 SERVER_ALLOWED_ORIGINS=http://localhost:5173
+SERVER_SESSION_SECRET=replace-with-a-long-random-secret
+SERVER_ADMIN_EMAILS=admin@example.com
 SERVER_COOKIE_SAME_SITE=lax
 SERVER_COOKIE_SECURE=false
+SERVER_CSRF_STRICT_ORIGIN=true
+SERVER_TRUST_PROXY=false
+SERVER_DEMO_ENABLED=true
+SERVER_DEMO_OWNER_ID=demo-owner-yieldflow
+
 VITE_GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
 VITE_API_BASE_URL=
 VITE_API_PROXY_TARGET=http://localhost:4000
-SERVER_SESSION_SECRET=replace-with-a-long-random-secret
-SERVER_ADMIN_EMAILS=admin@example.com
-SERVER_CSRF_STRICT_ORIGIN=true
-SERVER_RATE_LIMIT_WINDOW_MS=900000
-SERVER_AUTH_RATE_LIMIT_MAX=20
-SERVER_WRITE_RATE_LIMIT_MAX=120
-SERVER_IMPORT_RATE_LIMIT_MAX=10
-SERVER_BACKUP_RESTORE_RATE_LIMIT_MAX=5
-SERVER_TRUST_PROXY=false
-SERVER_HEALTH_DETAIL_TOKEN=
+VITE_DEFAULT_BACKUP_DESTINATION=local
 ```
 
-Use `VITE_API_BASE_URL` when the frontend should call an absolute backend URL directly.
-Leave it blank in local development and use `VITE_API_PROXY_TARGET` for the Vite `/api` proxy instead.
+Use `VITE_API_BASE_URL` when the frontend should call an absolute deployed API origin. Leave it blank in local development and use `VITE_API_PROXY_TARGET` so Vite proxies `/api` to Express.
 
 For cross-domain production deployments:
-- set `VITE_API_BASE_URL` to your deployed API origin
-- set `SERVER_ALLOWED_ORIGINS` to your deployed frontend origin
-- set `SERVER_COOKIE_SAME_SITE=none`
-- set `SERVER_COOKIE_SECURE=true`
+
+- set `VITE_API_BASE_URL` to the deployed API origin,
+- set `SERVER_ALLOWED_ORIGINS` to the deployed frontend origin,
+- set `SERVER_COOKIE_SAME_SITE=none`,
+- set `SERVER_COOKIE_SECURE=true`,
+- run over HTTPS.
 
 4. Start the app:
 
@@ -94,33 +113,89 @@ For cross-domain production deployments:
 npm.cmd run dev
 ```
 
-Frontend runs on Vite and proxies `/api` requests to the Express backend.
+The client runs through Vite and proxies `/api` requests to the Express backend.
 
 ## Scripts
 
-- `npm.cmd run dev` - run frontend and backend together
-- `npm.cmd run build` - build the frontend
-- `npm.cmd run lint` - run ESLint
-- `npm.cmd test` - run API and financial logic tests
-- `npm.cmd audit` - run npm dependency audit
-- `npm.cmd run seed:demo` - seed the public read-only demo portfolio in MongoDB
+- `npm.cmd run dev` - run frontend and backend together.
+- `npm.cmd run client` - run only Vite.
+- `npm.cmd run server` - run only Express.
+- `npm.cmd run build` - build the frontend.
+- `npm.cmd run lint` - run ESLint.
+- `npm.cmd test` - run API/security/domain tests.
+- `npm.cmd audit` - run npm dependency audit.
+- `npm.cmd run seed:demo` - seed the public read-only demo portfolio in MongoDB.
+- `npm.cmd run preview` - preview the production frontend build.
 
-## Architecture Notes
+## API Overview
 
-- The frontend is being split into feature-oriented modules so the app can scale beyond a single `App.jsx`.
-- Funding references use stable event identifiers such as `maturity:<depositId>` and `interest:<depositId>:<yyyy-mm-dd>`.
-- The main app operates against stored authenticated data; `/demo` loads a seeded public portfolio and keeps visitor edits in browser memory only.
-- Reference values such as owners, funding sources, institutions, branches, and instrument types now flow through a shared master-data model.
-- MongoDB collections are isolated for this application in a dedicated YieldFlow database: `investments`, `masterData`, `users`, `sessions`, `portfolioShares`, and `auditLogs`.
-- State-changing API requests are protected by strict Origin/Referer checks, request schemas deny unknown fields before writes, and production startup requires `SERVER_ALLOWED_ORIGINS`.
+The backend lives in `server/index.js` and exposes these route groups:
+
+- Health: `/api/health`, `/api/health/details`
+- Demo: `/api/demo/portfolio`, `/api/demo/tax-estimation`
+- Auth: `/api/auth/session`, `/api/auth/google`, `/api/auth/logout`
+- Sharing: `/api/shares`
+- Investments: `/api/deposits`, `/api/deposits/:id`, `/api/deposits/:id/archive`
+- Master data: `/api/master-data`
+- Tax: `/api/tax-estimation`
+- Import: `/api/investment-import`
+- Admin export: `/api/admin/export-data`
+- Backup/restore: `/api/data-backup/export`, `/api/data-backup/preview`, `/api/data-backup/restore`
+
+Most portfolio routes are owner-scoped. Shared portfolios are read-only for guests. Admin-only routes are guarded separately.
+
+## Domain Notes
+
+- Funding references use stable event IDs:
+  - `maturity:<depositId>`
+  - `interest:<depositId>:<yyyy-mm-dd>`
+- Master data is owner-scoped and canonicalizes owner, institution, branch, and instrument labels.
+- Owner aliases and owner tax slab rates feed search and tax estimation.
+- Periodic payout products can generate interest events before maturity.
+- Archive prevents removing investments still used as funding sources.
+- Hard delete is admin-only and cleans dependent funding links.
+- Public demo endpoints are disabled unless `SERVER_DEMO_ENABLED=true`.
+- Backup restore replaces owner-scoped deposits and master data after workbook validation.
+
+## Security Notes
+
+- Google credential tokens are verified server-side.
+- Sessions are stored in MongoDB as hashed tokens and sent as HTTP cookies.
+- Production startup requires `SERVER_ALLOWED_ORIGINS`.
+- State-changing API requests are protected by strict Origin/Referer checks when `SERVER_CSRF_STRICT_ORIGIN=true`.
+- Zod schemas deny unknown fields on sensitive writes.
+- Route-specific rate limits protect auth, writes, import, demo, and backup/restore endpoints.
 - Public health output is intentionally minimal; detailed health requires an admin session or `SERVER_HEALTH_DETAIL_TOKEN`.
-- Audit logs store scoped action metadata and high-risk markers instead of routine full before/after snapshots.
-- v2 admin controls should add MFA, just-in-time elevation, high-risk action alerts, and audit retention cleanup jobs.
-- React user data should remain text-rendered; do not introduce `dangerouslySetInnerHTML` without a dedicated sanitizer and review.
-- Public demo endpoints are disabled unless `SERVER_DEMO_ENABLED=true`; seed them with `SERVER_DEMO_OWNER_ID` before publishing `/demo`.
+- Audit logs capture scoped action metadata and high-risk operations.
+
+## Tests
+
+Current tests cover:
+
+- financial-year interest accrual and tax estimation behavior,
+- public demo isolation and demo rate limiting,
+- health endpoint privacy,
+- production origin/CSRF checks,
+- strict schema rejection of unexpected auth fields,
+- production startup guardrails.
+
+Run them with:
+
+```powershell
+npm.cmd test
+```
+
+## Current Maintainability Notes
+
+- `src/App.jsx` and `server/index.js` are still large orchestration files. New work should prefer extracting route handlers, services, hooks, and feature modules when the change naturally creates a boundary.
+- The investment Mongo schema is intentionally flexible for import and migration agility, so API validation and shared normalization are the real contracts.
+- The comprehensive technical/domain document lives at `docs/COMPLETE_APPLICATION_DOCUMENTATION.md`.
+- There are visible encoding artifacts in some existing UI copy, such as `â€¢`; those should be cleaned in a focused UI text pass.
 
 ## Roadmap
 
-- Continue extracting dashboard and shared UI primitives into dedicated modules
-- Add stronger automated testing around funding and archive rules
-- Introduce first-class persisted cash-flow events for richer reporting
+- Continue extracting dashboard, API, and backend route modules.
+- Add integration tests for auth/share/import/backup/archive flows.
+- Add an OpenAPI-style endpoint contract generated from or aligned with Zod schemas.
+- Introduce first-class persisted cash-flow events for richer reporting.
+- Add audit retention cleanup, high-risk alerts, MFA or just-in-time elevation for admin operations.

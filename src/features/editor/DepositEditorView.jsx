@@ -21,7 +21,7 @@ const getCompoundingFrequencyLabel = (value) => {
     return 'Quarterly compounding'
   }
 
-  return 'Auto (product default)'
+  return 'Quarterly compounding'
 }
 
 const buildSuggestedFundingSources = (fundingSourceOptions) =>
@@ -385,7 +385,6 @@ export default function DepositEditorView({
                   value={formValues.calculationFrequency}
                   onChange={handleFormChange}
                 >
-                  <option value="">Auto (product default)</option>
                   <option value="YEARLY">Yearly</option>
                   <option value="QUARTERLY">Quarterly</option>
                   <option value="MONTHLY">Monthly</option>
@@ -741,8 +740,11 @@ export default function DepositEditorView({
                   name="branchCity"
                   value={formValues.branchCity}
                   onChange={handleMasterBoundFieldChange}
+                  disabled={!formValues.bankName}
                 >
-                  <option value="">Choose branch</option>
+                  <option value="">
+                    {formValues.bankName ? 'Choose branch' : 'Choose bank or issuer first'}
+                  </option>
                   {branchOptions.map((branchName) => (
                     <option key={branchName} value={branchName}>
                       {branchName}
@@ -752,6 +754,9 @@ export default function DepositEditorView({
                     <option value={addNewMasterValue}>Add new branch...</option>
                   )}
                 </select>
+                <small className="field-help">
+                  Branch options are scoped to the selected bank or issuer.
+                </small>
               </label>
               <label className="field">
                 <span>Account or certificate no.</span>
