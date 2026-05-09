@@ -1,23 +1,21 @@
-<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="yieldflow-favicon-title">
+  <title id="yieldflow-favicon-title">YieldFlow</title>
   <defs>
-    <linearGradient id="blueBars" x1="44" y1="24" x2="90" y2="104" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#0F2F86"/>
-      <stop offset="1" stop-color="#1D4CB8"/>
+    <linearGradient id="mark-fill" x1="24" y1="18" x2="106" y2="112" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#20C997"/>
+      <stop offset="0.52" stop-color="#168C7A"/>
+      <stop offset="1" stop-color="#1E4B7A"/>
     </linearGradient>
-    <linearGradient id="greenArc" x1="12" y1="18" x2="50" y2="70" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#24C56E"/>
-      <stop offset="1" stop-color="#0F9C56"/>
+    <linearGradient id="gold-flow" x1="25" y1="73" x2="100" y2="35" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F6C85F"/>
+      <stop offset="1" stop-color="#F28C28"/>
     </linearGradient>
   </defs>
 
-  <path d="M14 69C16 42 35 21 61 16" stroke="url(#greenArc)" stroke-width="8" stroke-linecap="round"/>
-  <path d="M18 82C29 102 50 112 72 112C92 112 109 104 118 90" stroke="#1746B2" stroke-width="8" stroke-linecap="round"/>
-
-  <rect x="36" y="66" width="10" height="26" rx="2" fill="url(#blueBars)"/>
-  <rect x="52" y="52" width="10" height="40" rx="2" fill="url(#blueBars)"/>
-  <rect x="68" y="38" width="10" height="54" rx="2" fill="url(#blueBars)"/>
-  <rect x="84" y="24" width="10" height="68" rx="2" fill="url(#blueBars)"/>
-
-  <path d="M35 86L56 73L69 76L99 47" stroke="#123C9F" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M94 47H104V57" stroke="#123C9F" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="16" y="16" width="96" height="96" rx="28" fill="#F7FBFA"/>
+  <path d="M32 39C44 40 55 48 62 60L66 67L75 51C81 40 92 33 105 32" stroke="url(#mark-fill)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M66 67V97" stroke="url(#mark-fill)" stroke-width="12" stroke-linecap="round"/>
+  <path d="M30 80C45 72 56 70 68 75C80 80 91 76 102 62" stroke="url(#gold-flow)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="30" cy="80" r="5" fill="#F6C85F"/>
+  <circle cx="102" cy="62" r="5" fill="#F28C28"/>
 </svg>

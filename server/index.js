@@ -264,6 +264,9 @@ const importQuerySchema = ownerScopedQuerySchema.extend({
 const googleAuthBodySchema = z.object({
   credential: z.string().trim().min(1),
 }).strict()
+const googleRedirectAuthBodySchema = googleAuthBodySchema.extend({
+  g_csrf_token: z.string().trim().min(1).optional(),
+}).passthrough()
 const shareCreateBodySchema = z.object({
   guestEmail: z.string().trim().email().max(320),
 }).strict()
@@ -2050,6 +2053,53 @@ const createSession = async (userId) => {
   return { token, expiresAt }
 }
 
+const authenticateGoogleCredential = async (credential) => {
+  const googleProfile = await verifyGoogleCredential(credential)
+  const systemRole = adminEmails.has(googleProfile.email) ? 'admin' : 'user'
+  const upsertedUser = await YieldflowUser.findOneAndUpdate(
+    { googleSub: googleProfile.googleSub },
+    {
+      $set: {
+        email: googleProfile.email,
+        displayName: googleProfile.displayName,
+        photoUrl: googleProfile.photoUrl,
+        systemRole,
+        lastLoginAt: new Date(),
+      },
+    },
+    { new: true, upsert: true, setDefaultsOnInsert: true },
+  )
+
+  return normalizeUserDoc(upsertedUser.toObject())
+}
+
+const getSafeAuthRedirectUrl = (request) => {
+  const fallbackOrigin = allowedOrigins[0] || getServerOrigin(request)
+  const fallbackUrl = `${fallbackOrigin}/`
+  const requestOrigin = getRequestOrigin(request)
+
+  if (requestOrigin && allowedOrigins.includes(requestOrigin)) {
+    return `${requestOrigin}/`
+  }
+
+  const requestedUrl = String(request.query.returnTo || '').trim()
+
+  if (!requestedUrl) {
+    return fallbackUrl
+  }
+
+  try {
+    const parsedUrl = new URL(requestedUrl)
+    if (allowedOrigins.includes(parsedUrl.origin) || parsedUrl.origin === getServerOrigin(request)) {
+      return parsedUrl.toString()
+    }
+  } catch {
+    return fallbackUrl
+  }
+
+  return fallbackUrl
+}
+
 const getAccessiblePortfolioEntries = async (sessionUser) => {
   const userId = String(sessionUser.id)
 
@@ -2482,6 +2532,11 @@ const csrfOriginProtection = (request, response, next) => {
     return
   }
 
+  if (request.path === '/api/auth/google/redirect') {
+    next()
+    return
+  }
+
   const requestOrigin = getRequestOrigin(request)
   if (!isAllowedRequestOrigin(request, requestOrigin)) {
     console.warn('Blocked state-changing request with invalid origin', {
@@ -2586,29 +2641,37 @@ app.use(
   }),
 )
 app.use(
-  cors({
-    origin(origin, callback) {
-      if (!origin) {
-        callback(null, true)
-        return
-      }
+  cors((request, callback) => {
+    callback(null, {
+      origin(origin, originCallback) {
+        if (!origin) {
+          originCallback(null, true)
+          return
+        }
 
-      if (!isProduction && allowedOrigins.length === 0) {
-        callback(null, true)
-        return
-      }
+        if (request.path === '/api/auth/google/redirect') {
+          originCallback(null, true)
+          return
+        }
 
-      if (allowedOrigins.includes(origin)) {
-        callback(null, true)
-        return
-      }
+        if (!isProduction && allowedOrigins.length === 0) {
+          originCallback(null, true)
+          return
+        }
 
-      callback(new Error('CORS origin not allowed'))
-    },
-    credentials: true,
+        if (allowedOrigins.includes(origin)) {
+          originCallback(null, true)
+          return
+        }
+
+        originCallback(new Error('CORS origin not allowed'))
+      },
+      credentials: true,
+    })
   }),
 )
 app.use(express.json({ limit: '1mb' }))
+app.use(express.urlencoded({ extended: false, limit: '1mb' }))
 app.use(loadSessionUser)
 app.use(csrfOriginProtection)
 
@@ -2690,28 +2753,32 @@ app.get('/api/auth/session', async (request, response) => {
 })
 
 app.post('/api/auth/google', authRateLimiter, validateRequest(googleAuthBodySchema), async (request, response) => {
-  const googleProfile = await verifyGoogleCredential(request.body?.credential)
-  const systemRole = adminEmails.has(googleProfile.email) ? 'admin' : 'user'
-  const upsertedUser = await YieldflowUser.findOneAndUpdate(
-    { googleSub: googleProfile.googleSub },
-    {
-      $set: {
-        email: googleProfile.email,
-        displayName: googleProfile.displayName,
-        photoUrl: googleProfile.photoUrl,
-        systemRole,
-        lastLoginAt: new Date(),
-      },
-    },
-    { new: true, upsert: true, setDefaultsOnInsert: true },
-  )
-
-  const normalizedUser = normalizeUserDoc(upsertedUser.toObject())
-
+  const normalizedUser = await authenticateGoogleCredential(request.body?.credential)
   const { token } = await createSession(normalizedUser.id)
   setSessionCookie(response, token)
   response.json(await buildSessionResponse(normalizedUser))
 })
+
+app.post(
+  '/api/auth/google/redirect',
+  authRateLimiter,
+  validateRequest(googleRedirectAuthBodySchema),
+  async (request, response) => {
+    const redirectUrl = getSafeAuthRedirectUrl(request)
+    const bodyCsrfToken = String(request.body?.g_csrf_token || '').trim()
+    const cookieCsrfToken = String(parseCookies(request).g_csrf_token || '').trim()
+
+    if (!bodyCsrfToken || !cookieCsrfToken || bodyCsrfToken !== cookieCsrfToken) {
+      response.redirect(303, redirectUrl)
+      return
+    }
+
+    const normalizedUser = await authenticateGoogleCredential(request.body?.credential)
+    const { token } = await createSession(normalizedUser.id)
+    setSessionCookie(response, token)
+    response.redirect(303, redirectUrl)
+  },
+)
 
 app.post('/api/auth/logout', writeRateLimiter, async (request, response) => {
   const sessionToken = parseCookies(request)[SESSION_COOKIE_NAME]

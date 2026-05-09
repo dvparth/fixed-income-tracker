@@ -2,6 +2,15 @@ import { useEffect, useRef } from 'react'
 import { loadGoogleIdentityScript } from './googleIdentity.js'
 let initializedGoogleClientId = ''
 
+const getApiUrl = (path) => {
+  const apiBaseUrl = String(import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/$/, '')
+  return apiBaseUrl && path.startsWith('/') ? `${apiBaseUrl}${path}` : path
+}
+const GOOGLE_SIGN_IN_UX_MODE =
+  String(import.meta.env.VITE_GOOGLE_SIGN_IN_UX_MODE || '').trim().toLowerCase() === 'redirect'
+    ? 'redirect'
+    : 'popup'
+
 export default function AuthView({ onAuthenticate, error, isAuthenticating, themeClass }) {
   const buttonRef = useRef(null)
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
@@ -20,16 +29,24 @@ export default function AuthView({ onAuthenticate, error, isAuthenticating, them
           return
         }
 
-        if (initializedGoogleClientId !== googleClientId) {
+        const loginUri =
+          GOOGLE_SIGN_IN_UX_MODE === 'redirect'
+            ? getApiUrl('/api/auth/google/redirect')
+            : ''
+        const initializationKey = `${googleClientId}:${GOOGLE_SIGN_IN_UX_MODE}:${loginUri}`
+
+        if (initializedGoogleClientId !== initializationKey) {
           globalThis.google.accounts.id.initialize({
             client_id: googleClientId,
+            ux_mode: GOOGLE_SIGN_IN_UX_MODE,
+            ...(loginUri ? { login_uri: loginUri } : {}),
             callback: ({ credential }) => {
               if (credential) {
                 onAuthenticate(credential)
               }
             },
           })
-          initializedGoogleClientId = googleClientId
+          initializedGoogleClientId = initializationKey
         }
 
         buttonRef.current.replaceChildren()

@@ -327,6 +327,11 @@ Cross-domain cookie auth requires:
 - frontend `VITE_API_BASE_URL` pointing to the API origin,
 - API `SERVER_ALLOWED_ORIGINS` including the frontend origin.
 
+Google sign-in defaults to popup mode. Redirect mode is available with
+`VITE_GOOGLE_SIGN_IN_UX_MODE=redirect`, but the backend callback URL, such as
+`http://localhost:4000/api/auth/google/redirect`, must be registered in the
+Google Cloud OAuth client's Authorized redirect URIs.
+
 ### 9.5 Audit Logging
 
 High-risk and admin actions write audit records with actor, target, action, owner scope, and contextual metadata. Examples include delete, restore, export, master-data changes, and share changes.
@@ -365,6 +370,7 @@ Frontend:
 - `VITE_API_BASE_URL`
 - `VITE_API_PROXY_TARGET`
 - `VITE_GOOGLE_IDENTITY_SCRIPT_URL`
+- `VITE_GOOGLE_SIGN_IN_UX_MODE`
 - `VITE_GOOGLE_ACCESS_TOKEN_REFRESH_SKEW_SECONDS`
 - `VITE_GOOGLE_DRIVE_SCOPE`
 - `VITE_GOOGLE_DRIVE_BACKUP_FOLDER_NAME`

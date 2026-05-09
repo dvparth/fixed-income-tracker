@@ -94,6 +94,7 @@ SERVER_DEMO_OWNER_ID=demo-owner-yieldflow
 VITE_GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
 VITE_API_BASE_URL=
 VITE_API_PROXY_TARGET=http://localhost:4000
+VITE_GOOGLE_SIGN_IN_UX_MODE=popup
 VITE_DEFAULT_BACKUP_DESTINATION=local
 ```
 
@@ -106,6 +107,11 @@ For cross-domain production deployments:
 - set `SERVER_COOKIE_SAME_SITE=none`,
 - set `SERVER_COOKIE_SECURE=true`,
 - run over HTTPS.
+
+Google sign-in defaults to popup mode. Redirect mode is available by setting
+`VITE_GOOGLE_SIGN_IN_UX_MODE=redirect`, but the backend callback URL must first
+be added to the Google Cloud OAuth client Authorized redirect URIs, such as
+`http://localhost:4000/api/auth/google/redirect` for local development.
 
 4. Start the app:
 
