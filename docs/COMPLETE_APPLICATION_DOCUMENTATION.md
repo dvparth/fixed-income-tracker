@@ -12,6 +12,7 @@ Core capabilities:
 - model maturity and periodic interest as reusable cash events,
 - allocate later investments against prior cash events,
 - estimate owner-wise financial-year interest and tax,
+- show FY interest receipts separately from taxable interest estimates,
 - manage owner/institution/branch/instrument master data,
 - provide Google sign-in and owner-scoped portfolio access,
 - support read-only portfolio sharing,
@@ -203,7 +204,7 @@ Responsibilities:
 
 - app bootstrap and session hydration,
 - authenticated/demo/legal view orchestration,
-- dashboard calculations,
+- dashboard calculations, including FY cash receipt views for maturity interest and periodic interest payouts,
 - top-level state for deposits, master data, filters, active portfolio, and session timeout,
 - API calls and owner-scoped paths,
 - wiring child feature modules.
@@ -267,6 +268,8 @@ Important behavior:
 - Estimates taxable interest, TDS at 10%, and additional tax liability above TDS.
 
 Output is an estimate. It depends on correct principal, dates, rate, payout mode, calculation frequency, and owner tax slab configuration.
+
+The dashboard deliberately separates this taxable-interest estimate from FY interest realization. Taxable interest is accrual-oriented and may be spread across financial years. Interest realization is cash-oriented: it shows interest receipts landing in the selected FY, including full maturity interest for deposits maturing in that FY and periodic payout events dated inside that FY.
 
 ## 8. Import and Backup Contracts
 

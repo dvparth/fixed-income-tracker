@@ -1245,10 +1245,45 @@ function App() {
     const nextCashWindowCutoff = addDays(TODAY, DASHBOARD_UPCOMING_CASH_WINDOW_DAYS)
     const upcomingMaturities = [...openDeposits]
       .sort((left, right) => getDateSortValue(left.maturityDate) - getDateSortValue(right.maturityDate))
-    const realisedInterest = closedDeposits
+    const maturityInterestRealizationEvents = dashboardScopedDeposits
       .filter((deposit) => isWithinCurrentFy(deposit.maturityDate))
-      .reduce(
-      (sum, deposit) => sum + Number(deposit.totalInterestEarned || 0),
+      .map((deposit) => {
+        const principalAmount = Number(deposit.principalAmount || 0)
+        const maturityBeforeTax = Number(deposit.maturityBeforeTax || 0)
+        const grossInterestAmount = Math.max(maturityBeforeTax - principalAmount, 0)
+
+        return {
+          eventId: `realized-maturity-interest:${deposit.id}`,
+          depositId: deposit.id,
+          type: 'Maturity interest',
+          date: deposit.maturityDate,
+          amount: grossInterestAmount,
+          grossAmount: grossInterestAmount,
+          holderName: deposit.holderName,
+          bankName: deposit.bankName,
+          accountNumber: deposit.accountNumber,
+          instrumentType: deposit.instrumentType,
+          status: deposit.status,
+          receiptCount: 1,
+          sourceLabel: 'Maturity interest',
+        }
+      })
+      .filter((event) => event.amount > 0 || event.grossAmount > 0)
+    const periodicInterestRealizationEvents = dashboardScopedCashFlowEvents
+      .filter((event) => event.type === 'Interest' && isWithinCurrentFy(event.date))
+      .map((event) => ({
+        ...event,
+        type: 'Periodic interest',
+        amount: Number(event.grossAmount || 0),
+        instrumentType: event.sourceLabel || 'Interest payout',
+        receiptCount: 1,
+      }))
+    const interestRealizationEvents = [
+      ...maturityInterestRealizationEvents,
+      ...periodicInterestRealizationEvents,
+    ].sort((left, right) => new Date(left.date) - new Date(right.date))
+    const realisedInterest = interestRealizationEvents.reduce(
+      (sum, event) => sum + Number(event.amount || 0),
       0,
     )
     const maturedWithPostTds = dashboardScopedCashFlowEvents.filter(
@@ -1474,6 +1509,7 @@ function App() {
       maturityAwaitingReinvestment,
       uninvestedInterestCash,
       futureInterestCash,
+      interestRealizationEvents,
       dueInterestAwaitingReinvestment,
       dueInterestAwaitingReinvestmentSummary,
       upcomingInterestEvents,
@@ -1513,6 +1549,8 @@ function App() {
   const interestDashboardItems =
     interestFocusMode === 'pending'
       ? stats.dueInterestAwaitingReinvestmentSummary
+      : interestFocusMode === 'realizing'
+        ? stats.interestRealizationEvents
       : stats.upcomingInterestSummary
 
   const visibleInterestDashboardItems = showAllInterestItems
@@ -2641,7 +2679,8 @@ function App() {
   const showHeroStrip = visibleActiveTab === 'dashboard' && !isMobileEditorScreen
   const helpCopy = {
     'active-principal': 'This is the total amount currently invested in open deposits.',
-    'interest-realised': 'This is the interest already earned in the selected financial year.',
+    'interest-realised':
+      'This is interest cash expected to be received in the selected financial year, regardless of which year it is taxable in.',
     'unused-maturity-cash':
       'This is maturity cash already received and available to reinvest.',
     'interest-not-reused': 'This is interest cash already received and available to reinvest.',
@@ -2652,7 +2691,9 @@ function App() {
         ? 'These are deposits whose maturity money has come in but is still not fully used.'
         : 'These are the next deposits that will mature soon.',
     'interest-section':
-      interestFocusMode === 'pending'
+      interestFocusMode === 'realizing'
+        ? 'These are the interest receipts expected in the selected financial year, including maturity interest and periodic payouts.'
+        : interestFocusMode === 'pending'
         ? 'These are interest amounts already received and still available to reinvest.'
         : 'These are upcoming interest payouts from deposits that pay before maturity.',
   }
@@ -2904,6 +2945,11 @@ function App() {
   const showMaturityDrilldown = () => {
     setMaturityFocusMode('pending')
     scrollToDashboardSection('dashboard-maturity-section')
+  }
+
+  const showRealizedInterestDrilldown = () => {
+    setInterestFocusMode('realizing')
+    scrollToDashboardSection('dashboard-interest-section')
   }
 
   const showUnusedInterestDrilldown = () => {
@@ -3519,13 +3565,19 @@ function App() {
                 <strong>{formatCurrency(stats.openPrincipal)}</strong>
                 <small>{stats.openDeposits} open</small>
               </article>
-              <article className="stat-card">
+              <article
+                className="stat-card stat-card-action clickable-surface"
+                role="button"
+                tabIndex={0}
+                onClick={showRealizedInterestDrilldown}
+                onKeyDown={(event) => handleActionCardKeyDown(event, showRealizedInterestDrilldown)}
+              >
                 <span className="stat-label-row">
-                  <span>Interest earned (this year)</span>
-                  {renderHelpHint('interest-realised', 'This is the interest already earned in the selected financial year.')}
+                  <span>Interest realizing this FY</span>
+                  {renderHelpHint('interest-realised', 'This is interest cash expected to be received in the selected financial year, regardless of which year it is taxable in.')}
                 </span>
                 <strong>{formatCurrency(stats.realisedInterest)}</strong>
-                <small>FY {stats.currentFinancialYearLabel}</small>
+                <small>FY {stats.currentFinancialYearLabel} | View receipts</small>
               </article>
               <article
                 className="stat-card stat-card-action clickable-surface"
@@ -3697,17 +3749,25 @@ function App() {
                 <div>
                   <div className="section-title-row">
                     <h2>
-                      {interestFocusMode === 'pending' ? 'Interest to reinvest' : 'Interest timeline'}
+                      {interestFocusMode === 'realizing'
+                        ? 'Interest realizing this FY'
+                        : interestFocusMode === 'pending'
+                          ? 'Interest to reinvest'
+                          : 'Interest timeline'}
                     </h2>
                     {renderHelpHint(
                       'interest-section',
-                      interestFocusMode === 'pending'
+                      interestFocusMode === 'realizing'
+                        ? 'These are the interest receipts expected in the selected financial year, including maturity interest and periodic payouts.'
+                        : interestFocusMode === 'pending'
                         ? 'These are interest amounts already received but not yet fully used in new deposits.'
                         : 'These are future interest payouts expected from deposits that pay before maturity.',
                     )}
                   </div>
                   <p>
-                    {interestFocusMode === 'pending'
+                    {interestFocusMode === 'realizing'
+                      ? 'Maturity interest and periodic payouts landing in the selected FY.'
+                      : interestFocusMode === 'pending'
                       ? 'Interest cash already received and available to reinvest.'
                       : 'Upcoming interest payouts that may be reused.'}
                   </p>
@@ -3724,13 +3784,13 @@ function App() {
                   ) : null}
                   <button
                     type="button"
-                    className={interestFocusMode === 'pending' ? 'secondary-btn compact ghost-btn dashboard-toggle-btn' : 'secondary-btn compact dashboard-action-btn dashboard-toggle-btn'}
+                    className={interestFocusMode !== 'all' ? 'secondary-btn compact ghost-btn dashboard-toggle-btn' : 'secondary-btn compact dashboard-action-btn dashboard-toggle-btn'}
                     onClick={() => {
                       setShowAllInterestItems(false)
-                      setInterestFocusMode((current) => (current === 'pending' ? 'all' : 'pending'))
+                      setInterestFocusMode((current) => (current === 'all' ? 'pending' : 'all'))
                     }}
                   >
-                    {interestFocusMode === 'pending' ? 'Back' : 'View cash to reinvest'}
+                    {interestFocusMode !== 'all' ? 'Back' : 'View cash to reinvest'}
                   </button>
                 </div>
               </div>
@@ -3738,7 +3798,7 @@ function App() {
                 {interestDashboardItems.length > 0 ? (
                   visibleInterestDashboardItems.map((event) => (
                     <button
-                      key={event.depositId}
+                      key={event.eventId || event.depositId}
                       type="button"
                       className="deposit-card clickable-surface"
                       onClick={() => openDepositFromInterestEvent(event)}
@@ -3754,11 +3814,17 @@ function App() {
                       </p>
                       <p>
                         {formatCurrency(
-                          interestFocusMode === 'pending' ? event.pendingAmount : event.futureAmount,
+                          interestFocusMode === 'pending'
+                            ? event.pendingAmount
+                            : interestFocusMode === 'realizing'
+                              ? event.amount
+                              : event.futureAmount,
                         )}
                       </p>
                       <p>
-                        {interestFocusMode === 'pending'
+                        {interestFocusMode === 'realizing'
+                          ? `${event.instrumentType || event.sourceLabel || 'Interest'} | ${formatDate(event.date)}`
+                          : interestFocusMode === 'pending'
                           ? `${event.receiptCount} received interest payout${event.receiptCount === 1 ? '' : 's'} available`
                           : `${event.receiptCount} upcoming payout${event.receiptCount === 1 ? '' : 's'} | ${formatDate(event.nextPaymentDate)}`}
                       </p>
@@ -3770,7 +3836,9 @@ function App() {
                     </button>
                   ))
                 ) : (
-                  interestFocusMode === 'pending' ? (
+                  interestFocusMode === 'realizing' ? (
+                    <p className="lineage-empty">No interest receipts fall in this financial year.</p>
+                  ) : interestFocusMode === 'pending' ? (
                     <div className="empty-state-card">
                       <div className="empty-state-icon" aria-hidden="true">○</div>
                       <p className="lineage-empty">No received interest cash is available to reinvest.</p>

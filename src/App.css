@@ -3115,8 +3115,7 @@
 }
 
 .stat-card-action.clickable-surface::after {
-  top: 18px;
-  transform: none;
+  content: none;
 }
 
 .owner-card.clickable-surface::after {
