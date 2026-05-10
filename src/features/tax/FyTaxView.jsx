@@ -423,7 +423,7 @@ export default function FyTaxView({
                 className="mini-link tax-show-more"
                 onClick={() => setShowAllContributors((current) => !current)}
               >
-                {showAllContributors ? 'Show fewer' : `View full list (${topContributors.length})`}
+                {showAllContributors ? 'Show fewer' : `View all contributors (${topContributors.length})`}
               </button>
             ) : null}
           </section>

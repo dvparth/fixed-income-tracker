@@ -809,7 +809,7 @@ export default function DepositEditorView({
               <label className="field">
                 <span>Status</span>
                 <select name="status" value={formValues.status} onChange={handleFormChange}>
-                  <option value="Open">Open</option>
+                  <option value="Open">Active</option>
                   <option value="Closed">Closed</option>
                 </select>
               </label>

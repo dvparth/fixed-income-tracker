@@ -3563,7 +3563,7 @@ function App() {
                   {renderHelpHint('active-principal', 'This is the total amount currently invested in open deposits.')}
                 </span>
                 <strong>{formatCurrency(stats.openPrincipal)}</strong>
-                <small>{stats.openDeposits} open</small>
+                <small>{stats.openDeposits} active</small>
               </article>
               <article
                 className="stat-card stat-card-action clickable-surface"
@@ -3689,7 +3689,7 @@ function App() {
                       className="secondary-btn compact ghost-btn dashboard-toggle-btn"
                       onClick={() => setShowAllMaturityItems((current) => !current)}
                     >
-                      {showAllMaturityItems ? 'Show fewer' : 'View full list'}
+                      {showAllMaturityItems ? 'Show fewer' : 'View all maturities'}
                     </button>
                   ) : null}
                   <button
@@ -3700,7 +3700,7 @@ function App() {
                       setMaturityFocusMode((current) => (current === 'pending' ? 'all' : 'pending'))
                     }}
                   >
-                    {maturityFocusMode === 'pending' ? 'Back' : 'View cash to reinvest'}
+                    {maturityFocusMode === 'pending' ? 'Back to timeline' : 'View cash to reinvest'}
                   </button>
                 </div>
               </div>
@@ -3720,7 +3720,7 @@ function App() {
                     <div className="deposit-topline">
                       <strong>{deposit.bankName}</strong>
                       <span className={deposit.status === 'Closed' ? 'pill closed' : 'pill open'}>
-                        {deposit.status || deposit.type}
+                        {deposit.status === 'Open' ? 'Active' : deposit.status || deposit.type}
                       </span>
                     </div>
                     <p>
@@ -3738,7 +3738,7 @@ function App() {
                 ))}
                 {!showAllMaturityItems && maturityDashboardItems.length > visibleMaturityDashboardItems.length ? (
                   <p className="timeline-preview-more">
-                    View {maturityDashboardItems.length - visibleMaturityDashboardItems.length} more maturit{maturityDashboardItems.length - visibleMaturityDashboardItems.length === 1 ? 'y' : 'ies'}
+                    View all maturities
                   </p>
                 ) : null}
               </div>
@@ -3779,7 +3779,11 @@ function App() {
                       className="secondary-btn compact ghost-btn dashboard-toggle-btn"
                       onClick={() => setShowAllInterestItems((current) => !current)}
                     >
-                      {showAllInterestItems ? 'Show fewer' : 'View full list'}
+                      {showAllInterestItems
+                        ? 'Show fewer'
+                        : interestFocusMode === 'realizing'
+                        ? 'View all receipts'
+                          : 'View all payouts'}
                     </button>
                   ) : null}
                   <button
@@ -3790,7 +3794,7 @@ function App() {
                       setInterestFocusMode((current) => (current === 'all' ? 'pending' : 'all'))
                     }}
                   >
-                    {interestFocusMode !== 'all' ? 'Back' : 'View cash to reinvest'}
+                    {interestFocusMode !== 'all' ? 'Back to timeline' : 'View cash to reinvest'}
                   </button>
                 </div>
               </div>
@@ -3813,17 +3817,15 @@ function App() {
                         {event.holderName} | {event.accountNumber || 'No account number'}
                       </p>
                       <p>
-                        {formatCurrency(
-                          interestFocusMode === 'pending'
-                            ? event.pendingAmount
-                            : interestFocusMode === 'realizing'
-                              ? event.amount
-                              : event.futureAmount,
-                        )}
+                        {interestFocusMode === 'realizing'
+                          ? `Gross interest ${formatCurrency(event.amount)}`
+                          : formatCurrency(
+                              interestFocusMode === 'pending' ? event.pendingAmount : event.futureAmount,
+                            )}
                       </p>
                       <p>
                         {interestFocusMode === 'realizing'
-                          ? `${event.instrumentType || event.sourceLabel || 'Interest'} | ${formatDate(event.date)}`
+                          ? `${event.instrumentType || event.sourceLabel || 'Interest'} | ${event.type === 'Maturity interest' ? 'Maturity' : 'Receipt'} ${formatDate(event.date)}`
                           : interestFocusMode === 'pending'
                           ? `${event.receiptCount} received interest payout${event.receiptCount === 1 ? '' : 's'} available`
                           : `${event.receiptCount} upcoming payout${event.receiptCount === 1 ? '' : 's'} | ${formatDate(event.nextPaymentDate)}`}
@@ -3849,7 +3851,7 @@ function App() {
                 )}
                 {!showAllInterestItems && interestDashboardItems.length > visibleInterestDashboardItems.length ? (
                   <p className="timeline-preview-more">
-                    View {interestDashboardItems.length - visibleInterestDashboardItems.length} more payout{interestDashboardItems.length - visibleInterestDashboardItems.length === 1 ? '' : 's'}
+                    {interestFocusMode === 'realizing' ? 'View all receipts' : `View ${interestDashboardItems.length - visibleInterestDashboardItems.length} more payout${interestDashboardItems.length - visibleInterestDashboardItems.length === 1 ? '' : 's'}`}
                   </p>
                 ) : null}
               </div>
@@ -3860,7 +3862,7 @@ function App() {
             <div className={isMobileEditorScreen ? 'section-head editor-intro mobile-editor-intro' : 'section-head editor-intro'}>
               <div>
                 <h2>Owners</h2>
-                <p>Open amount by holder.</p>
+                <p>Active principal by holder.</p>
               </div>
             </div>
             <div className="owner-grid">
@@ -3920,7 +3922,7 @@ function App() {
                     <p>
                       <strong>
                         <span className="owner-card-icon-label" aria-hidden="true">◌</span>
-                        <span>Open</span>
+                        <span>Active</span>
                       </strong>
                       <span>{owner.openDeposits} investments</span>
                     </p>
