@@ -3440,7 +3440,7 @@ function App() {
 
       {(isLoading || loadError) && (
         <section className={loadError ? 'status-banner error' : 'status-banner'}>
-          {isLoading ? (isDemoMode ? 'Loading demo portfolio...' : 'Loading portfolio from MongoDB...') : loadError}
+          {isLoading ? (isDemoMode ? 'Loading demo portfolio...' : 'Loading your portfolio...') : loadError}
         </section>
       )}
 
