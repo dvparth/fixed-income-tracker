@@ -776,7 +776,7 @@ export default function DepositEditorView({
                 <input name="srNo" value={formValues.srNo} readOnly autoComplete="off" />
               </label>
               <label className="field">
-                <span>Total interest earned</span>
+                <span>Net interest after TDS</span>
                 <input
                   name="totalInterestEarned"
                   type="number"

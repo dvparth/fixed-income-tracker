@@ -14,7 +14,7 @@ const GOOGLE_SIGN_IN_UX_MODE =
 export default function AuthView({ onAuthenticate, error, isAuthenticating, themeClass }) {
   const buttonRef = useRef(null)
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
-  const appHomeUrl = 'https://getyieldflow.netlify.app'
+  const appHomeUrl = window.location.origin
 
   useEffect(() => {
     let isMounted = true

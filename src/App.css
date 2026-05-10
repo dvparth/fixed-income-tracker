@@ -4041,7 +4041,7 @@
 .mobile-fab {
   position: fixed;
   right: 18px;
-  bottom: 88px;
+  bottom: calc(112px + env(safe-area-inset-bottom));
   z-index: 8;
   width: 58px;
   height: 58px;

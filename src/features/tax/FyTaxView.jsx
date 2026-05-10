@@ -439,8 +439,8 @@ export default function FyTaxView({
             <div className="tax-owner-table-head">
               <span>Owner</span>
               <span>Investments</span>
-              <span>FY interest</span>
-              <span>Share of total interest</span>
+              <span>Taxable interest</span>
+              <span>Share of taxable interest</span>
             </div>
             <div className="tax-owner-stack">
           {visibleOwnerSummaries.map((ownerSummary) => {
@@ -467,7 +467,7 @@ export default function FyTaxView({
                 </div>
                 <div className="tax-owner-summary-cell">
                   <strong>{formatCurrency(ownerSummary.totalEstimatedTaxableInterest)}</strong>
-                  <span>FY interest</span>
+                  <span>Taxable interest</span>
                 </div>
                 <div className="tax-owner-summary-cell">
                   <strong>{formatContributionPercent(ownerSummary.totalEstimatedTaxableInterest, totalTaxableInterest)}</strong>

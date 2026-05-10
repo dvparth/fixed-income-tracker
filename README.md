@@ -10,7 +10,7 @@ The app is built around one practical domain problem: fixed-income investments a
 - Record owners, institutions, branches, instrument types, rates, maturity values, TDS, payout schedules, and notes.
 - Generate reusable cash events from maturities and periodic interest payouts.
 - Link new investments to prior maturity or interest events through allocation records.
-- View upcoming maturities, pending interest cash, FY interest receipts, owner summaries, grouped deposits, and reinvestment usage.
+- View upcoming maturities, pending interest cash, FY gross interest receipts, owner summaries, grouped deposits, and reinvestment usage.
 - Estimate owner-wise financial-year interest, TDS, taxable interest, and additional tax liability.
 - Manage master data for owners, institutions, branches, aliases, instrument types, and owner tax slabs.
 - Sign in with Google, use cookie-backed server sessions, and share portfolios read-only with other users.
@@ -158,7 +158,7 @@ Most portfolio routes are owner-scoped. Shared portfolios are read-only for gues
 - Master data is owner-scoped and canonicalizes owner, institution, branch, and instrument labels.
 - Owner aliases and owner tax slab rates feed search and tax estimation.
 - Periodic payout products can generate interest events before maturity.
-- Dashboard FY interest receipts are separate from taxable interest estimates: the receipt view shows interest cash landing in the selected FY, including maturity interest that may have accrued across earlier FYs.
+- Dashboard FY gross interest receipts are separate from taxable interest estimates: the receipt view shows interest scheduled in the selected FY before TDS, including maturity interest that may have accrued across earlier FYs.
 - Archive prevents removing investments still used as funding sources.
 - Hard delete is admin-only and cleans dependent funding links.
 - Public demo endpoints are disabled unless `SERVER_DEMO_ENABLED=true`.

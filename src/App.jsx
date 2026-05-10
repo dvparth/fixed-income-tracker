@@ -18,7 +18,7 @@ import { buildOwnerAliasLookup, emptyMasterData, normalizeMasterData } from '../
 const ADD_NEW_MASTER_VALUE = '__add_new_master__'
 const THEME_STORAGE_KEY = 'yieldflow.theme'
 const AUTHOR_LINKEDIN_URL = 'https://www.linkedin.com/in/parthdave2'
-const APP_HOME_URL = 'https://getyieldflow.netlify.app'
+const APP_HOME_URL = window.location.origin
 const parsePositiveEnvNumber = (key, fallback) => {
   const number = Number(import.meta.env[key])
   return Number.isFinite(number) && number > 0 ? number : fallback
@@ -2680,7 +2680,7 @@ function App() {
   const helpCopy = {
     'active-principal': 'This is the total amount currently invested in open deposits.',
     'interest-realised':
-      'This is interest cash expected to be received in the selected financial year, regardless of which year it is taxable in.',
+      'Gross interest scheduled in the selected FY, before TDS, regardless of which FY it is taxable in.',
     'unused-maturity-cash':
       'This is maturity cash already received and available to reinvest.',
     'interest-not-reused': 'This is interest cash already received and available to reinvest.',
@@ -2692,7 +2692,7 @@ function App() {
         : 'These are the next deposits that will mature soon.',
     'interest-section':
       interestFocusMode === 'realizing'
-        ? 'These are the interest receipts expected in the selected financial year, including maturity interest and periodic payouts.'
+        ? 'These are gross interest receipts scheduled in the selected FY, including maturity interest and periodic payouts.'
         : interestFocusMode === 'pending'
         ? 'These are interest amounts already received and still available to reinvest.'
         : 'These are upcoming interest payouts from deposits that pay before maturity.',
@@ -3573,8 +3573,8 @@ function App() {
                 onKeyDown={(event) => handleActionCardKeyDown(event, showRealizedInterestDrilldown)}
               >
                 <span className="stat-label-row">
-                  <span>Interest realizing this FY</span>
-                  {renderHelpHint('interest-realised', 'This is interest cash expected to be received in the selected financial year, regardless of which year it is taxable in.')}
+                  <span>Gross interest receipts this FY</span>
+                  {renderHelpHint('interest-realised', 'Gross interest scheduled in the selected FY, before TDS, regardless of which FY it is taxable in.')}
                 </span>
                 <strong>{formatCurrency(stats.realisedInterest)}</strong>
                 <small>FY {stats.currentFinancialYearLabel} | View receipts</small>
@@ -3750,7 +3750,7 @@ function App() {
                   <div className="section-title-row">
                     <h2>
                       {interestFocusMode === 'realizing'
-                        ? 'Interest realizing this FY'
+                        ? 'Gross interest receipts this FY'
                         : interestFocusMode === 'pending'
                           ? 'Interest to reinvest'
                           : 'Interest timeline'}
@@ -3758,7 +3758,7 @@ function App() {
                     {renderHelpHint(
                       'interest-section',
                       interestFocusMode === 'realizing'
-                        ? 'These are the interest receipts expected in the selected financial year, including maturity interest and periodic payouts.'
+                        ? 'Gross interest scheduled in the selected FY, before TDS, regardless of which FY it is taxable in.'
                         : interestFocusMode === 'pending'
                         ? 'These are interest amounts already received but not yet fully used in new deposits.'
                         : 'These are future interest payouts expected from deposits that pay before maturity.',
@@ -3766,7 +3766,7 @@ function App() {
                   </div>
                   <p>
                     {interestFocusMode === 'realizing'
-                      ? 'Maturity interest and periodic payouts landing in the selected FY.'
+                      ? 'Maturity interest and periodic payouts scheduled in the selected FY, shown before TDS.'
                       : interestFocusMode === 'pending'
                       ? 'Interest cash already received and available to reinvest.'
                       : 'Upcoming interest payouts that may be reused.'}
@@ -3837,7 +3837,7 @@ function App() {
                   ))
                 ) : (
                   interestFocusMode === 'realizing' ? (
-                    <p className="lineage-empty">No interest receipts fall in this financial year.</p>
+                    <p className="lineage-empty">No gross interest receipts are scheduled in this financial year.</p>
                   ) : interestFocusMode === 'pending' ? (
                     <div className="empty-state-card">
                       <div className="empty-state-icon" aria-hidden="true">○</div>
@@ -3934,7 +3934,7 @@ function App() {
                     <p>
                       <strong>
                         <span className="owner-card-icon-label" aria-hidden="true">FY</span>
-                      <span>Share of total interest</span>
+                      <span>Share of taxable interest</span>
                       </strong>
                       <span>
                         {formatCurrency(owner.fyContribution)}
