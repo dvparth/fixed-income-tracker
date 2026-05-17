@@ -13,6 +13,7 @@ const DEPOSIT_MATURING_SOON_WINDOW_DAYS = Math.floor(
 const DEPOSIT_GROUP_SECTION_LIMIT = Math.floor(
   parsePositiveEnvNumber('VITE_DEPOSIT_GROUP_SECTION_LIMIT', 5),
 )
+const DETAIL_EVENT_PREVIEW_LIMIT = 3
 
 export default function DepositsView({
   isMobile,
@@ -80,9 +81,27 @@ export default function DepositsView({
   const [ownerFilter, setOwnerFilter] = useState('all')
   const [investmentTypeFilter, setInvestmentTypeFilter] = useState('all')
   const [showAllDepositGroups, setShowAllDepositGroups] = useState(false)
+  const [showAllTimelineItems, setShowAllTimelineItems] = useState(false)
+  const [showAllInterestEvents, setShowAllInterestEvents] = useState(false)
   const [expandedGroupKeys, setExpandedGroupKeys] = useState({})
   const [expandedStatusSections, setExpandedStatusSections] = useState({})
   const [expandedTimelineItems, setExpandedTimelineItems] = useState({})
+  const hasViewFilters =
+    hasActiveDepositFilters ||
+    ownerFilter !== 'all' ||
+    investmentTypeFilter !== 'all'
+
+  const clearDepositFilters = () => {
+    setSearchScope('all')
+    setSearchText('')
+    setInvestmentDateFrom('')
+    setInvestmentDateTo('')
+    setMaturityDateFrom('')
+    setMaturityDateTo('')
+    setShowClosed(true)
+    setOwnerFilter('all')
+    setInvestmentTypeFilter('all')
+  }
 
   const getContributionAmount = (deposit) => {
     const grossMaturity = Number(deposit.maturityBeforeTax || 0)
@@ -130,6 +149,12 @@ export default function DepositsView({
       setSelectedId(null)
     }
   }, [selectedDeposit, selectedId, setSelectedId])
+
+  useEffect(() => {
+    setShowAllTimelineItems(false)
+    setShowAllInterestEvents(false)
+    setExpandedTimelineItems({})
+  }, [selectedId])
 
   const groupedDeposits = useMemo(() => {
     const groupMap = new Map()
@@ -539,9 +564,11 @@ export default function DepositsView({
           </div>
         </div>
         <div className="deposit-card-side">
-          <span className={deposit.status === 'Closed' ? 'pill closed' : 'pill open'}>
-            {deposit.status}
-          </span>
+          {(deposit.status === 'Closed' || isPastMaturityOpen(deposit)) && (
+            <span className={deposit.status === 'Closed' ? 'pill closed' : 'pill open'}>
+              {deposit.status === 'Closed' ? 'Closed' : 'Review'}
+            </span>
+          )}
           <span className="deposit-time-remaining">{formatTenure(deposit)}</span>
         </div>
       </div>
@@ -550,8 +577,7 @@ export default function DepositsView({
       </div>
       <div className="deposit-meta">
         <span>{deposit.holderName}</span>
-        <span>{deposit.instrumentType}</span>
-        <span>{getPayoutModeLabel(deposit)}</span>
+        <span>Maturity {formatDate(deposit.maturityDate)}</span>
       </div>
       {deposit.status !== 'Closed' && (
         <div className="deposit-progress" aria-hidden="true">
@@ -598,12 +624,7 @@ export default function DepositsView({
                 ctaLabel: '',
                 onClick: null,
               }
-            : {
-                title: 'No action required',
-                detail: 'This deposit does not need an immediate reinvestment or cashflow action.',
-                ctaLabel: '',
-                onClick: null,
-              }
+            : null
     : null
 
   const cashStatusSummary = selectedDeposit
@@ -624,6 +645,18 @@ export default function DepositsView({
             : 0) + Number(selectedInterestSummary?.totalDueUnallocated || 0),
       }
     : null
+
+  const hasPositiveAmount = (value) => Number(value || 0) > 0
+  const isPeriodicDeposit = selectedDeposit
+    ? String(selectedDeposit.payoutMode || 'on-maturity') !== 'on-maturity'
+    : false
+  const isClosedDeposit = selectedDeposit?.status === 'Closed'
+  const showCashStatusSummary = cashStatusSummary
+    ? Number(cashStatusSummary.received || 0) > 0 ||
+      Number(cashStatusSummary.reinvested || 0) > 0 ||
+      Number(cashStatusSummary.upcoming || 0) > 0 ||
+      Number(cashStatusSummary.availableToReinvest || 0) > 0
+    : false
 
   const detailTimelineItems = selectedDeposit
     ? [
@@ -659,7 +692,7 @@ export default function DepositsView({
           status: event.isDue ? 'Received' : 'Upcoming',
           detail: event.isDue
             ? `Reinvested ${formatCurrency(event.allocatedWithinEventAmount)} • Left ${formatCurrency(event.unallocatedAmount)}`
-            : `Pre-TDS ${formatCurrency(event.grossAmount)} • Post-TDS ${formatCurrency(event.amount)}`,
+            : `Before TDS ${formatCurrency(event.grossAmount)} • After TDS ${formatCurrency(event.amount)}`,
           canAllocate: Boolean(!isReadOnly && event.isDue && event.unallocatedAmount > 0),
           onAllocate: () => applyCashFlowSource(event),
         })),
@@ -668,6 +701,13 @@ export default function DepositsView({
           new Date(`${left.date}T00:00:00`).getTime() - new Date(`${right.date}T00:00:00`).getTime(),
       )
     : []
+  const visibleDetailTimelineItems = showAllTimelineItems
+    ? detailTimelineItems
+    : detailTimelineItems.slice(0, DETAIL_EVENT_PREVIEW_LIMIT)
+  const interestEventRows = selectedInterestSummary?.eventRows || []
+  const visibleInterestEventRows = showAllInterestEvents
+    ? interestEventRows
+    : interestEventRows.slice(0, DETAIL_EVENT_PREVIEW_LIMIT)
 
   const renderMobileDetailSection = (sectionKey, title, subtitle, children) => (
     <section className="mobile-detail-section">
@@ -745,25 +785,12 @@ export default function DepositsView({
         />
       )}
 
-      <section className="deposit-management-summary">
-        <div className="interest-summary-grid">
-          <div className="interest-summary-card">
-            <span>Visible deposits</span>
-            <strong>{viewFilteredDeposits.length}</strong>
-          </div>
-          <div className="interest-summary-card">
-            <span>Status groups</span>
-            <strong>{groupedDeposits.length}</strong>
-          </div>
-        </div>
-      </section>
-
       {isMobile ? (
         <div className="mobile-filter-shell">
           <div className="mobile-filter-summary">
             <div>
               <strong>Filters</strong>
-              <span>{hasActiveDepositFilters || ownerFilter !== 'all' || investmentTypeFilter !== 'all' ? 'Active filters applied' : 'Browse deposits by status'}</span>
+              <span>{hasViewFilters ? 'Active filters applied' : 'Browse deposits by status'}</span>
               {mobileFilterBadges.length > 0 && (
                 <div className="mobile-filter-badges">
                   {mobileFilterBadges.map((badge) => (
@@ -782,6 +809,15 @@ export default function DepositsView({
             >
               {isMobileFiltersOpen ? 'Hide filters' : 'Show filters'}
             </button>
+            {hasViewFilters ? (
+              <button
+                type="button"
+                className="secondary-btn compact ghost-btn"
+                onClick={clearDepositFilters}
+              >
+                Clear filters
+              </button>
+            ) : null}
           </div>
           <div className="deposit-results-summary mobile-results-summary" role="status" aria-live="polite">
             <strong>{viewFilteredDeposits.length}</strong>
@@ -893,14 +929,25 @@ export default function DepositsView({
 
           {dateRangeFilters}
 
-          <label className="checkbox-row">
-            <input
-              type="checkbox"
-              checked={showClosed}
-              onChange={(event) => setShowClosed(event.target.checked)}
-            />
-            <span>Show closed deposits</span>
-          </label>
+          <div className="deposit-filter-actions">
+            <label className="checkbox-row">
+              <input
+                type="checkbox"
+                checked={showClosed}
+                onChange={(event) => setShowClosed(event.target.checked)}
+              />
+              <span>Show closed deposits</span>
+            </label>
+            {hasViewFilters ? (
+              <button
+                type="button"
+                className="secondary-btn compact ghost-btn"
+                onClick={clearDepositFilters}
+              >
+                Clear filters
+              </button>
+            ) : null}
+          </div>
 
           <div className="deposit-results-summary" role="status" aria-live="polite">
             <strong>{viewFilteredDeposits.length}</strong>
@@ -913,7 +960,7 @@ export default function DepositsView({
         <div className="section-head section-head-split">
           <div>
             <h3>Deposits by status</h3>
-            <p>Open the bucket you want to work on next.</p>
+            <p>Choose a deposit group to review.</p>
           </div>
           {groupedDeposits.length > DEPOSIT_GROUP_SECTION_LIMIT ? (
             <button
@@ -922,8 +969,8 @@ export default function DepositsView({
               onClick={() => setShowAllDepositGroups((current) => !current)}
             >
               {showAllDepositGroups
-                ? `Show top ${DEPOSIT_GROUP_SECTION_LIMIT} in each section`
-                : 'View more groups'}
+                ? 'Show fewer groups'
+                : 'View all groups'}
             </button>
           ) : null}
         </div>
@@ -967,9 +1014,13 @@ export default function DepositsView({
                       </div>
                     ) : null}
                     {!showAllDepositGroups && section.groups.length > visibleGroups.length ? (
-                      <p className="timeline-preview-more">
+                      <button
+                        type="button"
+                        className="mini-link timeline-preview-more"
+                        onClick={() => setShowAllDepositGroups(true)}
+                      >
                         View {section.groups.length - visibleGroups.length} more groups
-                      </p>
+                      </button>
                     ) : null}
                   </div>
                 ) : null}
@@ -1047,8 +1098,12 @@ export default function DepositsView({
             </div>
             <div className="detail-grid detail-grid-compact">
               <div><span>Next maturity</span><strong>{formatDate(selectedDeposit.maturityDate)}</strong></div>
-              <div><span>Interest payout schedule</span><strong>{getPayoutModeLabel(selectedDeposit)}</strong></div>
-              <div><span>Interest calc</span><strong>{getCalculationFrequencyLabel(selectedDeposit.calculationFrequency)}</strong></div>
+              {isPeriodicDeposit && (
+                <div><span>Next payout schedule</span><strong>{getPayoutModeLabel(selectedDeposit)}</strong></div>
+              )}
+              {isClosedDeposit && (
+                <div><span>Interest calc</span><strong>{getCalculationFrequencyLabel(selectedDeposit.calculationFrequency)}</strong></div>
+              )}
               <div><span>Interest rate</span><strong>{formatInterestRate(selectedDeposit.interestRate)}</strong></div>
             </div>
           </div>
@@ -1066,6 +1121,7 @@ export default function DepositsView({
               ) : null}
             </div>
           ) : null}
+          {showCashStatusSummary ? (
           <div className="interest-summary-grid">
             <div className="interest-summary-card">
               <span>Cash received</span>
@@ -1086,6 +1142,7 @@ export default function DepositsView({
               </strong>
             </div>
           </div>
+          ) : null}
           {!isReadOnly && archiveTargetId === selectedDeposit.id && (
             <div className="inline-action-card">
               <div>
@@ -1143,12 +1200,20 @@ export default function DepositsView({
                   <div><span>Interest calc</span><strong>{getCalculationFrequencyLabel(selectedDeposit.calculationFrequency)}</strong></div>
                   <div><span>Principal</span><strong>{formatCurrency(selectedDeposit.principalAmount)}</strong></div>
                   <div><span>Interest rate</span><strong>{formatInterestRate(selectedDeposit.interestRate)}</strong></div>
-                  <div><span>Interest payout before TDS</span><strong>{formatCurrency(selectedDeposit.interestPayoutBeforeTds)}</strong></div>
-                  <div><span>Interest payout after TDS</span><strong>{formatCurrency(selectedDeposit.interestPayoutAfterTds)}</strong></div>
+                  {isPeriodicDeposit && hasPositiveAmount(selectedDeposit.interestPayoutBeforeTds) && (
+                    <div><span>Interest payout before TDS</span><strong>{formatCurrency(selectedDeposit.interestPayoutBeforeTds)}</strong></div>
+                  )}
+                  {isPeriodicDeposit && hasPositiveAmount(selectedDeposit.interestPayoutAfterTds) && (
+                    <div><span>Interest payout after TDS</span><strong>{formatCurrency(selectedDeposit.interestPayoutAfterTds)}</strong></div>
+                  )}
                   <div><span>Invested on</span><strong>{formatDate(selectedDeposit.investmentDate)}</strong></div>
                   <div><span>Matures on</span><strong>{formatDate(selectedDeposit.maturityDate)}</strong></div>
-                  <div><span>Maturity before TDS</span><strong>{formatCurrency(selectedDeposit.maturityBeforeTax)}</strong></div>
-                  <div><span>Maturity after TDS</span><strong>{formatCurrency(selectedDeposit.maturityAfterTax)}</strong></div>
+                  {hasPositiveAmount(selectedDeposit.maturityBeforeTax) && (
+                    <div><span>{isClosedDeposit ? 'Maturity before TDS' : 'Expected maturity before TDS'}</span><strong>{formatCurrency(selectedDeposit.maturityBeforeTax)}</strong></div>
+                  )}
+                  {hasPositiveAmount(selectedDeposit.maturityAfterTax) && (
+                    <div><span>Maturity after TDS</span><strong>{formatCurrency(selectedDeposit.maturityAfterTax)}</strong></div>
+                  )}
                 </div>,
               )}
 
@@ -1210,8 +1275,8 @@ export default function DepositsView({
                   <div className="panel inset-panel mobile-section-block">
                     <div className="section-head section-head-split">
                       <div>
-                        <h2>Interest</h2>
-                        <p>Generated cash flow events for periodic-interest products.</p>
+                        <h2>Interest schedule</h2>
+                        <p>Upcoming and received payout events for this deposit.</p>
                       </div>
                       {!isReadOnly && selectedInterestSummary.totalDueUnallocated > 0 && (
                         <div className="section-head-actions">
@@ -1231,7 +1296,7 @@ export default function DepositsView({
                           {formatCurrency(selectedInterestSummary.totalDueUnallocated)}
                         </strong>
                       </div>
-                      <div className="interest-summary-card"><span>Upcoming interest payouts</span><strong>{formatCurrency(selectedInterestSummary.totalFutureExpected)}</strong></div>
+                      <div className="interest-summary-card"><span>Upcoming interest</span><strong>{formatCurrency(selectedInterestSummary.totalFutureExpected)}</strong></div>
                       {selectedInterestSummary.totalExternalTopUp > 0 && (
                         <div className="interest-summary-card">
                           <span>Added from other funds</span>
@@ -1241,12 +1306,12 @@ export default function DepositsView({
                       )}
                     </div>
                     <div className="schedule-list">
-                      {selectedInterestSummary.eventRows.map((event) => (
+                      {visibleInterestEventRows.map((event) => (
                         <div key={event.eventId} className="schedule-card schedule-card-stacked">
                           <div>
                             <strong>{formatDate(event.date)}</strong>
                             <p>{event.isDue ? 'Status: Received' : 'Status: Upcoming'}</p>
-                            <p>Pre-TDS {formatCurrency(event.grossAmount)} | Post-TDS {formatCurrency(event.amount)}</p>
+                            <p>Before TDS {formatCurrency(event.grossAmount)} | After TDS {formatCurrency(event.amount)}</p>
                             <p>Event ID {event.eventId}</p>
                             <p>
                               Reinvested {formatCurrency(event.allocatedWithinEventAmount)} | Left to allocate{' '}
@@ -1290,10 +1355,19 @@ export default function DepositsView({
                               </div>
                             </div>
                           ) : !event.isDue ? (
-                            <p className="lineage-empty">This interest payout is upcoming and cannot be used yet.</p>
+                            <p className="lineage-empty">Available after payout date.</p>
                           ) : null}
                         </div>
                       ))}
+                      {interestEventRows.length > DETAIL_EVENT_PREVIEW_LIMIT ? (
+                        <button
+                          type="button"
+                          className="mini-link timeline-preview-more"
+                          onClick={() => setShowAllInterestEvents((current) => !current)}
+                        >
+                          {showAllInterestEvents ? 'Show fewer interest events' : 'View full interest schedule'}
+                        </button>
+                      ) : null}
                     </div>
                   </div>,
                 )}
@@ -1308,12 +1382,20 @@ export default function DepositsView({
                 <div><span>Interest calc</span><strong>{getCalculationFrequencyLabel(selectedDeposit.calculationFrequency)}</strong></div>
                 <div><span>Principal</span><strong>{formatCurrency(selectedDeposit.principalAmount)}</strong></div>
                 <div><span>Interest rate</span><strong>{formatInterestRate(selectedDeposit.interestRate)}</strong></div>
-                <div><span>Interest payout before TDS</span><strong>{formatCurrency(selectedDeposit.interestPayoutBeforeTds)}</strong></div>
-                <div><span>Interest payout after TDS</span><strong>{formatCurrency(selectedDeposit.interestPayoutAfterTds)}</strong></div>
+                {isPeriodicDeposit && hasPositiveAmount(selectedDeposit.interestPayoutBeforeTds) && (
+                  <div><span>Interest payout before TDS</span><strong>{formatCurrency(selectedDeposit.interestPayoutBeforeTds)}</strong></div>
+                )}
+                {isPeriodicDeposit && hasPositiveAmount(selectedDeposit.interestPayoutAfterTds) && (
+                  <div><span>Interest payout after TDS</span><strong>{formatCurrency(selectedDeposit.interestPayoutAfterTds)}</strong></div>
+                )}
                 <div><span>Invested on</span><strong>{formatDate(selectedDeposit.investmentDate)}</strong></div>
                 <div><span>Matures on</span><strong>{formatDate(selectedDeposit.maturityDate)}</strong></div>
-                <div><span>Maturity before TDS</span><strong>{formatCurrency(selectedDeposit.maturityBeforeTax)}</strong></div>
-                <div><span>Maturity after TDS</span><strong>{formatCurrency(selectedDeposit.maturityAfterTax)}</strong></div>
+                {hasPositiveAmount(selectedDeposit.maturityBeforeTax) && (
+                  <div><span>{isClosedDeposit ? 'Maturity before TDS' : 'Expected maturity before TDS'}</span><strong>{formatCurrency(selectedDeposit.maturityBeforeTax)}</strong></div>
+                )}
+                {hasPositiveAmount(selectedDeposit.maturityAfterTax) && (
+                  <div><span>Maturity after TDS</span><strong>{formatCurrency(selectedDeposit.maturityAfterTax)}</strong></div>
+                )}
               </div>
 
               <div className="meta-block">
@@ -1348,12 +1430,12 @@ export default function DepositsView({
               <section className="deposit-timeline-panel">
                 <div className="section-head section-head-split">
                   <div>
-                    <h3>Timeline</h3>
-                    <p>Open an item to see full cashflow detail.</p>
+                    <h3>Cashflow timeline</h3>
+                    <p>Select an event to review allocation details.</p>
                   </div>
                 </div>
                 <div className="deposit-timeline-list">
-                  {detailTimelineItems.map((item) => {
+                  {visibleDetailTimelineItems.map((item) => {
                     const isExpanded = Boolean(expandedTimelineItems[item.key])
 
                     return (
@@ -1387,6 +1469,15 @@ export default function DepositsView({
                       </article>
                     )
                   })}
+                  {detailTimelineItems.length > DETAIL_EVENT_PREVIEW_LIMIT ? (
+                    <button
+                      type="button"
+                      className="mini-link timeline-preview-more"
+                      onClick={() => setShowAllTimelineItems((current) => !current)}
+                    >
+                      {showAllTimelineItems ? 'Show fewer timeline events' : 'View full timeline'}
+                    </button>
+                  ) : null}
                 </div>
               </section>
 
@@ -1399,8 +1490,8 @@ export default function DepositsView({
                 <div className="panel inset-panel">
                   <div className="section-head section-head-split">
                     <div>
-                      <h2>Interest</h2>
-                      <p>Generated cash flow events for periodic-interest products.</p>
+                      <h2>Interest schedule</h2>
+                      <p>Upcoming and received payout events for this deposit.</p>
                     </div>
                     {!isReadOnly && selectedInterestSummary.totalDueUnallocated > 0 && (
                       <div className="section-head-actions">
@@ -1420,7 +1511,7 @@ export default function DepositsView({
                         {formatCurrency(selectedInterestSummary.totalDueUnallocated)}
                       </strong>
                     </div>
-                    <div className="interest-summary-card"><span>Upcoming interest payouts</span><strong>{formatCurrency(selectedInterestSummary.totalFutureExpected)}</strong></div>
+                    <div className="interest-summary-card"><span>Upcoming interest</span><strong>{formatCurrency(selectedInterestSummary.totalFutureExpected)}</strong></div>
                     {selectedInterestSummary.totalExternalTopUp > 0 && (
                       <div className="interest-summary-card">
                         <span>Added from other funds</span>
@@ -1430,12 +1521,12 @@ export default function DepositsView({
                     )}
                   </div>
                   <div className="schedule-list">
-                    {selectedInterestSummary.eventRows.map((event) => (
+                    {visibleInterestEventRows.map((event) => (
                       <div key={event.eventId} className="schedule-card schedule-card-stacked">
                         <div>
                           <strong>{formatDate(event.date)}</strong>
                           <p>{event.isDue ? 'Status: Received' : 'Status: Upcoming'}</p>
-                          <p>Pre-TDS {formatCurrency(event.grossAmount)} | Post-TDS {formatCurrency(event.amount)}</p>
+                          <p>Before TDS {formatCurrency(event.grossAmount)} | After TDS {formatCurrency(event.amount)}</p>
                           <p>Event ID {event.eventId}</p>
                           <p>
                             Reinvested {formatCurrency(event.allocatedWithinEventAmount)} | Left to allocate{' '}
@@ -1479,10 +1570,19 @@ export default function DepositsView({
                             </div>
                           </div>
                         ) : !event.isDue ? (
-                          <p className="lineage-empty">This interest payout is upcoming and cannot be used yet.</p>
+                          <p className="lineage-empty">Available after payout date.</p>
                         ) : null}
                       </div>
                     ))}
+                    {interestEventRows.length > DETAIL_EVENT_PREVIEW_LIMIT ? (
+                      <button
+                        type="button"
+                        className="mini-link timeline-preview-more"
+                        onClick={() => setShowAllInterestEvents((current) => !current)}
+                      >
+                        {showAllInterestEvents ? 'Show fewer interest events' : 'View full interest schedule'}
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               )}

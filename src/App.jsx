@@ -3731,8 +3731,8 @@ function App() {
                     </p>
                     <p>
                       {maturityFocusMode === 'pending'
-                        ? `Still to reinvest ${formatCurrency(deposit.unallocatedAmount)}`
-                        : `Matures on ${formatDate(deposit.maturityDate)}`}
+                        ? `Maturity date ${formatDate(deposit.date)} | Still to reinvest ${formatCurrency(deposit.unallocatedAmount)}`
+                        : `Maturity date ${formatDate(deposit.maturityDate)}`}
                     </p>
                   </button>
                 ))}
