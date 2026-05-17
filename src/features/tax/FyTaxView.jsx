@@ -549,7 +549,12 @@ export default function FyTaxView({
                                         <div className="tax-breakdown-head">
                                           <div>
                                             <strong>{investment.accountNumber || 'No account number'}</strong>
-                                            <p>{investment.investmentType || 'Investment'} | {investment.valueDate} to {investment.maturityDate}</p>
+                                            <p>
+                                              {investment.investmentType || 'Investment'} | {investment.valueDate} to {investment.maturityDate}
+                                              {investment.closureDate && investment.contractualMaturityDate && investment.contractualMaturityDate !== investment.closureDate
+                                                ? ` | original maturity ${investment.contractualMaturityDate}`
+                                                : ''}
+                                            </p>
                                           </div>
                                           <span className={`pill ${String(investment.status || '').trim().toUpperCase() === 'CLOSED' ? 'closed' : 'open'}`}>
                                             {investment.status || 'Open'}
@@ -668,7 +673,12 @@ export default function FyTaxView({
                                                 <div className="tax-breakdown-head">
                                                   <div>
                                                     <strong>{investment.accountNumber || 'No account number'}</strong>
-                                                    <p>{investment.investmentType || 'Investment'} | {investment.valueDate} to {investment.maturityDate}</p>
+                                                    <p>
+                                                      {investment.investmentType || 'Investment'} | {investment.valueDate} to {investment.maturityDate}
+                                                      {investment.closureDate && investment.contractualMaturityDate && investment.contractualMaturityDate !== investment.closureDate
+                                                        ? ` | original maturity ${investment.contractualMaturityDate}`
+                                                        : ''}
+                                                    </p>
                                                   </div>
                                                   <span className={`pill ${String(investment.status || '').trim().toUpperCase() === 'CLOSED' ? 'closed' : 'open'}`}>
                                                     {investment.status || 'Open'}

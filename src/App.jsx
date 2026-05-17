@@ -12,7 +12,7 @@ import FyTaxView from './features/tax/FyTaxView.jsx'
 import { downloadInvestmentsWorkbook } from './features/admin/exportWorkbook.js'
 import { DEMO_PORTFOLIO_LABEL } from '../shared/demoPortfolio.js'
 import { generateOwnerWiseFYTaxSummary, parseFinancialYearLabel } from '../shared/fyTaxEngine.js'
-import { APP_ACTIVITY_EVENT, TODAY, addDays, computeTdsAmount, computeTdsPercent, deriveTenureParts, emptyForm, formatAllocationsText, formatCurrency, formatDate, formatTenure, generateInterestEvents, getCashSettlements, getCurrentFinancialYearRange, getDateSortValue, getEffectivePayoutMode, getFinancialYearLabelFromDate, getFinancialYearRangeFromLabel, getFundingAllocations, getHolderSearchTokens, getMaturitySourceEventId, getPayoutModeLabel, getPostTdsAmount, hydrateDeposit, needsPeriodicPayoutSetup, normalizeDeposit, parseAllocationEntries, requestJson, toYmd } from './features/deposits/depositModel.js'
+import { APP_ACTIVITY_EVENT, TODAY, addDays, computeTdsAmount, computeTdsPercent, deriveTenureParts, emptyForm, formatAllocationsText, formatCurrency, formatDate, formatTenure, generateInterestEvents, getCashSettlements, getCurrentFinancialYearRange, getDateSortValue, getEffectiveMaturityDate, getEffectivePayoutMode, getFinancialYearLabelFromDate, getFinancialYearRangeFromLabel, getFundingAllocations, getHolderSearchTokens, getMaturitySourceEventId, getPayoutModeLabel, getPostTdsAmount, hydrateDeposit, needsPeriodicPayoutSetup, normalizeDeposit, parseAllocationEntries, requestJson, toYmd } from './features/deposits/depositModel.js'
 import { buildOwnerAliasLookup, emptyMasterData, normalizeMasterData } from '../shared/masterData.js'
 
 const ADD_NEW_MASTER_VALUE = '__add_new_master__'
@@ -329,10 +329,11 @@ const getDateDayCount = (startValue, endValue) => {
 
 const buildTaxEstimationInvestmentInput = (deposit) => {
   const normalizedPayoutMode = String(deposit.payoutMode || '').trim().toLowerCase()
+  const effectiveMaturityDate = getEffectiveMaturityDate(deposit)
   const derivedTenureDays =
-    Number.isFinite(Number(deposit.tenureDays)) && Number(deposit.tenureDays) > 0
+    !deposit.closureDate && Number.isFinite(Number(deposit.tenureDays)) && Number(deposit.tenureDays) > 0
       ? Number(deposit.tenureDays)
-      : getDateDayCount(deposit.investmentDate, deposit.maturityDate)
+      : getDateDayCount(deposit.investmentDate, effectiveMaturityDate)
   const payoutFrequency =
     normalizedPayoutMode === 'quarterly-fy'
       ? 'QUARTERLY'
@@ -357,7 +358,11 @@ const buildTaxEstimationInvestmentInput = (deposit) => {
     principal: Number(deposit.principalAmount || 0),
     interestRate: Number(deposit.interestRate || 0),
     valueDate: deposit.investmentDate,
-    maturityDate: deposit.maturityDate,
+    maturityDate: effectiveMaturityDate,
+    contractualMaturityDate: deposit.maturityDate,
+    closureDate: deposit.closureDate || '',
+    status: deposit.status || 'Open',
+    maturityBeforeTax: deposit.maturityBeforeTax,
     tenureDays: derivedTenureDays,
     institutionName: String(deposit.bankName || '').trim(),
     investmentType: String(deposit.instrumentType || '').trim(),
@@ -513,6 +518,7 @@ function App() {
   const [maturityDateFrom, setMaturityDateFrom] = useState('')
   const [maturityDateTo, setMaturityDateTo] = useState('')
   const [showClosed, setShowClosed] = useState(true)
+  const [depositFilterResetSeed, setDepositFilterResetSeed] = useState(0)
   const [editingId, setEditingId] = useState(null)
   const [formValues, setFormValues] = useState(emptyForm)
   const [formErrors, setFormErrors] = useState({})
@@ -523,6 +529,7 @@ function App() {
   const [deleteTargetId, setDeleteTargetId] = useState(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [settlingEventId, setSettlingEventId] = useState('')
+  const [closingInvestmentId, setClosingInvestmentId] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [portfolioReloadSeed, setPortfolioReloadSeed] = useState(0)
@@ -971,11 +978,14 @@ function App() {
 
       const postTdsAmount = getPostTdsAmount(deposit)
       if (postTdsAmount !== null) {
+        const realizationDate = getEffectiveMaturityDate(deposit)
         events.push({
           eventId: getMaturitySourceEventId(deposit.id),
           depositId: deposit.id,
           type: 'Maturity',
-          date: deposit.maturityDate,
+          date: realizationDate,
+          contractualMaturityDate: deposit.maturityDate,
+          closureDate: deposit.closureDate || '',
           amount: postTdsAmount,
           grossAmount: Number(deposit.maturityBeforeTax || postTdsAmount),
           holderName: deposit.holderName,
@@ -1021,6 +1031,7 @@ function App() {
       ;[
         deposit.investmentDate,
         deposit.maturityDate,
+        deposit.closureDate,
       ].forEach((value) => {
         const label = getFinancialYearLabelFromDate(value)
         if (label) {
@@ -1246,17 +1257,20 @@ function App() {
     const upcomingMaturities = [...openDeposits]
       .sort((left, right) => getDateSortValue(left.maturityDate) - getDateSortValue(right.maturityDate))
     const maturityInterestRealizationEvents = dashboardScopedDeposits
-      .filter((deposit) => isWithinCurrentFy(deposit.maturityDate))
+      .filter((deposit) => isWithinCurrentFy(getEffectiveMaturityDate(deposit)))
       .map((deposit) => {
         const principalAmount = Number(deposit.principalAmount || 0)
         const maturityBeforeTax = Number(deposit.maturityBeforeTax || 0)
         const grossInterestAmount = Math.max(maturityBeforeTax - principalAmount, 0)
+        const realizationDate = getEffectiveMaturityDate(deposit)
 
         return {
           eventId: `realized-maturity-interest:${deposit.id}`,
           depositId: deposit.id,
           type: 'Maturity interest',
-          date: deposit.maturityDate,
+          date: realizationDate,
+          contractualMaturityDate: deposit.maturityDate,
+          closureDate: deposit.closureDate || '',
           amount: grossInterestAmount,
           grossAmount: grossInterestAmount,
           holderName: deposit.holderName,
@@ -1562,6 +1576,7 @@ function App() {
         const children = allocationMap.get(getMaturitySourceEventId(selectedDeposit.id)) ?? []
         const settlements = settlementMap.get(getMaturitySourceEventId(selectedDeposit.id)) ?? []
         const availableAmount = getPostTdsAmount(selectedDeposit)
+        const realizationDate = getEffectiveMaturityDate(selectedDeposit)
         const reinvestedAmount = children.reduce(
           (sum, child) => sum + Number(child.amount || 0),
           0,
@@ -1579,7 +1594,8 @@ function App() {
           uninvestedAmount: availableAmount === null ? null : Math.max(availableAmount - reinvestedAmount - settledAmount, 0),
           childCount: children.length,
           children,
-          isRealized: new Date(`${selectedDeposit.maturityDate}T00:00:00`) <= TODAY,
+          realizationDate,
+          isRealized: new Date(`${realizationDate}T00:00:00`) <= TODAY,
         }
       })()
     : null
@@ -1627,6 +1643,7 @@ function App() {
     principalAmount: deposit.principalAmount ?? '',
     investmentDate: deposit.investmentDate ?? '',
     maturityDate: deposit.maturityDate ?? '',
+    closureDate: deposit.closureDate ?? '',
     maturityBeforeTax: deposit.maturityBeforeTax ?? '',
     maturityAfterTax: deposit.maturityAfterTax ?? '',
     totalInterestEarned: deposit.totalInterestEarned ?? '',
@@ -1773,6 +1790,7 @@ function App() {
       principalAmount: deposit.principalAmount ?? '',
       investmentDate: '',
       maturityDate: '',
+      closureDate: '',
       maturityBeforeTax: '',
       maturityAfterTax: '',
       totalInterestEarned: '',
@@ -1793,6 +1811,31 @@ function App() {
 
   const openDepositDetail = (depositId) => {
     setSelectedId(depositId)
+    setMobileDepositsScreen('detail')
+    setMobileDetailSections({
+      summary: true,
+      funding: false,
+      maturity: false,
+      interest: false,
+    })
+    setInterestFocusMode('all')
+    setMaturityFocusMode('all')
+    setActiveTab('deposits')
+  }
+
+  const focusDepositAfterSave = (deposit, shouldResetFilters = false) => {
+    if (shouldResetFilters) {
+      setSearchScope('all')
+      setSearchText('')
+      setInvestmentDateFrom('')
+      setInvestmentDateTo('')
+      setMaturityDateFrom('')
+      setMaturityDateTo('')
+      setShowClosed(true)
+      setDepositFilterResetSeed((current) => current + 1)
+    }
+
+    setSelectedId(deposit.id)
     setMobileDepositsScreen('detail')
     setMobileDetailSections({
       summary: true,
@@ -2143,6 +2186,7 @@ function App() {
 
     setFormErrors({})
 
+    const isCreatingDeposit = !editingId
     const normalized = normalizeDeposit(effectiveFormValues, editingId, nextSrNo, currentEditingDeposit)
 
     if (isDemoMode) {
@@ -2154,9 +2198,7 @@ function App() {
             : [savedDeposit, ...current],
         )
       })
-      setSelectedId(savedDeposit.id)
-      setActiveTab('deposits')
-      setMobileDepositsScreen(isMobile ? 'detail' : 'list')
+      focusDepositAfterSave(savedDeposit, isCreatingDeposit)
       resetForm()
       return
     }
@@ -2183,12 +2225,69 @@ function App() {
         })
       })
 
-      setSelectedId(savedDeposit.id)
-      setActiveTab('deposits')
-      setMobileDepositsScreen(isMobile ? 'detail' : 'list')
+      focusDepositAfterSave(savedDeposit, isCreatingDeposit)
       resetForm()
     } catch (error) {
       setLoadError(error.message)
+    }
+  }
+
+  const closeInvestment = async (deposit, closeValues) => {
+    if (!canEditPortfolio || !deposit?.id || closingInvestmentId) {
+      return null
+    }
+
+    const effectiveCloseValues = {
+      closureDate: closeValues?.closureDate ?? toYmd(TODAY),
+      maturityBeforeTax: closeValues?.maturityBeforeTax ?? '',
+      maturityAfterTax: closeValues?.maturityAfterTax ?? '',
+      notes: closeValues?.notes ?? '',
+    }
+    const nextFormValues = {
+      ...mapDepositToFormValues(deposit),
+      closureDate: effectiveCloseValues.closureDate,
+      maturityBeforeTax: effectiveCloseValues.maturityBeforeTax,
+      maturityAfterTax: effectiveCloseValues.maturityAfterTax,
+      notes: effectiveCloseValues.notes,
+      status: 'Closed',
+    }
+    const normalized = normalizeDeposit(nextFormValues, deposit.id, deposit.srNo || nextSrNo, deposit)
+
+    if (isDemoMode) {
+      const savedDeposit = hydrateDeposit(normalized)
+      startTransition(() => {
+        setDeposits((current) =>
+          current.map((currentDeposit) => (currentDeposit.id === savedDeposit.id ? savedDeposit : currentDeposit)),
+        )
+      })
+      setSelectedId(savedDeposit.id)
+      setShowClosed(true)
+      return savedDeposit
+    }
+
+    try {
+      setClosingInvestmentId(deposit.id)
+      setLoadError('')
+      const savedDeposit = hydrateDeposit(
+        await requestJson(buildOwnerScopedPath(`/api/deposits/${deposit.id}`, activePortfolioOwnerId), {
+          method: 'PUT',
+          body: JSON.stringify(normalized),
+        }),
+      )
+
+      startTransition(() => {
+        setDeposits((current) =>
+          current.map((currentDeposit) => (currentDeposit.id === savedDeposit.id ? savedDeposit : currentDeposit)),
+        )
+      })
+      setSelectedId(savedDeposit.id)
+      setShowClosed(true)
+      return savedDeposit
+    } catch (error) {
+      setLoadError(error.message)
+      throw error
+    } finally {
+      setClosingInvestmentId('')
     }
   }
 
@@ -3982,6 +4081,7 @@ function App() {
           isMobileFiltersOpen={isMobileFiltersOpen}
           setIsMobileFiltersOpen={setIsMobileFiltersOpen}
           hasActiveDepositFilters={hasActiveDepositFilters}
+          depositFilterResetSeed={depositFilterResetSeed}
           mobileFilterBadges={mobileFilterBadges}
           searchScope={searchScope}
           setSearchScope={setSearchScope}
@@ -4009,6 +4109,7 @@ function App() {
           isArchiving={isArchiving}
           deleteTargetId={deleteTargetId}
           isDeleting={isDeleting}
+          closingInvestmentId={closingInvestmentId}
           startNewDeposit={startNewDeposit}
           openDepositDetail={openDepositDetail}
           setMobileDepositsScreen={setMobileDepositsScreen}
@@ -4020,6 +4121,7 @@ function App() {
           startDelete={startDelete}
           cancelDelete={cancelDelete}
           confirmDelete={confirmDelete}
+          closeInvestment={closeInvestment}
           fillFromSelectedMaturity={fillFromSelectedMaturity}
           fillFromAllAvailableInterest={fillFromAllAvailableInterest}
           applyCashFlowSource={applyCashFlowSource}

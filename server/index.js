@@ -300,6 +300,7 @@ const depositWriteBodySchema = z.object({
   principalAmount: numericFormField,
   investmentDate: optionalTextField,
   maturityDate: optionalTextField,
+  closureDate: optionalTextField,
   maturityBeforeTax: numericFormField,
   maturityAfterTax: numericFormField,
   totalInterestEarned: numericFormField,
@@ -502,6 +503,9 @@ const getDateDayCount = (startValue, endValue) => {
   return Math.max(Math.floor((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)), 0)
 }
 
+const getEffectiveMaturityDate = (deposit = {}) =>
+  deposit.status === 'Closed' && deposit.closureDate ? deposit.closureDate : deposit.maturityDate
+
 const normalizeImportDate = (value) => {
   if (!value && value !== 0) {
     return ''
@@ -669,10 +673,11 @@ const buildInvestmentIdentityKey = ({
 
 const buildTaxEstimationInvestmentInput = (deposit) => {
   const normalizedPayoutMode = String(deposit.payoutMode || '').trim().toLowerCase()
+  const effectiveMaturityDate = getEffectiveMaturityDate(deposit)
   const derivedTenureDays =
-    Number.isFinite(Number(deposit.tenureDays)) && Number(deposit.tenureDays) > 0
+    !deposit.closureDate && Number.isFinite(Number(deposit.tenureDays)) && Number(deposit.tenureDays) > 0
       ? Number(deposit.tenureDays)
-      : getDateDayCount(deposit.investmentDate, deposit.maturityDate)
+      : getDateDayCount(deposit.investmentDate, effectiveMaturityDate)
   const payoutFrequency =
     normalizedPayoutMode === 'quarterly-fy'
       ? 'QUARTERLY'
@@ -697,7 +702,11 @@ const buildTaxEstimationInvestmentInput = (deposit) => {
     principal: Number(deposit.principalAmount || 0),
     interestRate: Number(deposit.interestRate || 0),
     valueDate: deposit.investmentDate,
-    maturityDate: deposit.maturityDate,
+    maturityDate: effectiveMaturityDate,
+    contractualMaturityDate: deposit.maturityDate,
+    closureDate: deposit.closureDate || '',
+    status: deposit.status || 'Open',
+    maturityBeforeTax: deposit.maturityBeforeTax,
     tenureDays: derivedTenureDays,
     institutionName: String(deposit.bankName || '').trim(),
     investmentType: String(deposit.instrumentType || '').trim(),
@@ -1084,6 +1093,7 @@ const buildBackupWorkbookBuffer = ({ portfolioLabel, ownerUserId, deposits, mast
     Status: deposit.status || '',
     'Investment Date': deposit.investmentDate || '',
     'Maturity Date': deposit.maturityDate || '',
+    'Closure Date': deposit.closureDate || '',
     Principal: Number(deposit.principalAmount || 0),
     'Payout Mode': deposit.payoutMode || '',
     'Calculation Frequency': deposit.calculationFrequency || '',
@@ -1284,6 +1294,7 @@ const validateBackupSnapshot = ({ metadataRows, masterData, deposits }) => {
     const instrumentType = String(payload?.instrumentType || entry.row?.Instrument || '').trim()
     const investmentDate = String(payload?.investmentDate || entry.row?.['Investment Date'] || '').trim()
     const maturityDate = String(payload?.maturityDate || entry.row?.['Maturity Date'] || '').trim()
+    const closureDate = String(payload?.closureDate || entry.row?.['Closure Date'] || '').trim()
     const principalAmount = Number(payload?.principalAmount || entry.row?.Principal || 0)
     const allocations = Array.isArray(payload?.allocations) ? payload.allocations : []
     const cashSettlements = Array.isArray(payload?.cashSettlements) ? payload.cashSettlements : []
@@ -1333,6 +1344,10 @@ const validateBackupSnapshot = ({ metadataRows, masterData, deposits }) => {
       payloadErrors.push('Maturity date must be in YYYY-MM-DD format.')
     }
 
+    if (closureDate && !isValidBackupDate(closureDate)) {
+      payloadErrors.push('Closure date must be in YYYY-MM-DD format.')
+    }
+
     if (!Number.isFinite(principalAmount) || principalAmount <= 0) {
       payloadErrors.push('Principal must be a positive number.')
     }
@@ -1373,6 +1388,7 @@ const validateBackupSnapshot = ({ metadataRows, masterData, deposits }) => {
         status: String(payload?.status || entry.row?.Status || '').trim() || 'Open',
         investmentDate,
         maturityDate,
+        closureDate,
       },
       payload: payload
         ? {
@@ -1385,6 +1401,7 @@ const validateBackupSnapshot = ({ metadataRows, masterData, deposits }) => {
             instrumentType,
             investmentDate,
             maturityDate,
+            closureDate,
             principalAmount,
           }
         : null,

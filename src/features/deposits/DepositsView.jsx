@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import BulkImportPanel from '../import/BulkImportPanel.jsx'
-import { formatInterestRate, generateInterestEvents, getCalculationFrequencyLabel } from './depositModel.js'
+import { formatInterestRate, generateInterestEvents, getCalculationFrequencyLabel, getEffectiveMaturityDate } from './depositModel.js'
 
 const SHOW_BULK_IMPORT = false
 const parsePositiveEnvNumber = (key, fallback) => {
@@ -14,6 +14,12 @@ const DEPOSIT_GROUP_SECTION_LIMIT = Math.floor(
   parsePositiveEnvNumber('VITE_DEPOSIT_GROUP_SECTION_LIMIT', 5),
 )
 const DETAIL_EVENT_PREVIEW_LIMIT = 3
+const toInputDate = (date) => {
+  const year = date.getFullYear()
+  const month = `${date.getMonth() + 1}`.padStart(2, '0')
+  const day = `${date.getDate()}`.padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
 
 export default function DepositsView({
   isMobile,
@@ -25,6 +31,7 @@ export default function DepositsView({
   isMobileFiltersOpen,
   setIsMobileFiltersOpen,
   hasActiveDepositFilters,
+  depositFilterResetSeed,
   mobileFilterBadges,
   searchScope,
   setSearchScope,
@@ -52,6 +59,7 @@ export default function DepositsView({
   isArchiving,
   deleteTargetId,
   isDeleting,
+  closingInvestmentId,
   startNewDeposit,
   openDepositDetail,
   setMobileDepositsScreen,
@@ -63,6 +71,7 @@ export default function DepositsView({
   startDelete,
   cancelDelete,
   confirmDelete,
+  closeInvestment,
   fillFromSelectedMaturity,
   fillFromAllAvailableInterest,
   applyCashFlowSource,
@@ -86,6 +95,14 @@ export default function DepositsView({
   const [expandedGroupKeys, setExpandedGroupKeys] = useState({})
   const [expandedStatusSections, setExpandedStatusSections] = useState({})
   const [expandedTimelineItems, setExpandedTimelineItems] = useState({})
+  const [closeTargetId, setCloseTargetId] = useState('')
+  const [closeDraft, setCloseDraft] = useState({
+    closureDate: '',
+    maturityBeforeTax: '',
+    maturityAfterTax: '',
+    notes: '',
+  })
+  const [closeError, setCloseError] = useState('')
   const hasViewFilters =
     hasActiveDepositFilters ||
     ownerFilter !== 'all' ||
@@ -102,6 +119,11 @@ export default function DepositsView({
     setOwnerFilter('all')
     setInvestmentTypeFilter('all')
   }
+
+  useEffect(() => {
+    setOwnerFilter('all')
+    setInvestmentTypeFilter('all')
+  }, [depositFilterResetSeed])
 
   const getContributionAmount = (deposit) => {
     const grossMaturity = Number(deposit.maturityBeforeTax || 0)
@@ -154,6 +176,8 @@ export default function DepositsView({
     setShowAllTimelineItems(false)
     setShowAllInterestEvents(false)
     setExpandedTimelineItems({})
+    setCloseTargetId('')
+    setCloseError('')
   }, [selectedId])
 
   const groupedDeposits = useMemo(() => {
@@ -462,7 +486,7 @@ export default function DepositsView({
       return (
         <>
           <p><strong>Expected maturity cash:</strong> {formatCurrency(selectedReinvestmentSummary.availableAmount)}</p>
-          <p><strong>Maturity date:</strong> {formatDate(selectedDeposit.maturityDate)}</p>
+          <p><strong>Expected cash date:</strong> {formatDate(selectedReinvestmentSummary.realizationDate || selectedDeposit.maturityDate)}</p>
           <p>This cash is not available to reinvest yet because the maturity has not been realized.</p>
         </>
       )
@@ -471,6 +495,7 @@ export default function DepositsView({
     return (
       <>
         <p><strong>Maturity cash received:</strong> {formatCurrency(selectedReinvestmentSummary.availableAmount)}</p>
+        <p><strong>Cash received on:</strong> {formatDate(selectedReinvestmentSummary.realizationDate || selectedDeposit.maturityDate)}</p>
         <p><strong>Already reinvested:</strong> {formatCurrency(selectedReinvestmentSummary.reinvestedAmount)}</p>
         <p><strong>Settled outside YieldFlow:</strong> {formatCurrency(selectedReinvestmentSummary.settledAmount)}</p>
         <p>
@@ -651,19 +676,106 @@ export default function DepositsView({
     ? String(selectedDeposit.payoutMode || 'on-maturity') !== 'on-maturity'
     : false
   const isClosedDeposit = selectedDeposit?.status === 'Closed'
+  const canCloseSelectedDeposit = Boolean(!isReadOnly && selectedDeposit && selectedDeposit.status === 'Open')
   const showCashStatusSummary = cashStatusSummary
     ? Number(cashStatusSummary.received || 0) > 0 ||
       Number(cashStatusSummary.reinvested || 0) > 0 ||
       Number(cashStatusSummary.upcoming || 0) > 0 ||
       Number(cashStatusSummary.availableToReinvest || 0) > 0
     : false
+  const closePrincipalAmount = Number(selectedDeposit?.principalAmount || 0)
+  const closeMaturityBeforeTax = Number(closeDraft.maturityBeforeTax || 0)
+  const closeMaturityAfterTax = Number(closeDraft.maturityAfterTax || 0)
+  const closeGrossInterest = Math.max(closeMaturityBeforeTax - closePrincipalAmount, 0)
+  const closeTdsDeducted = Math.max(closeMaturityBeforeTax - closeMaturityAfterTax, 0)
+  const closeNetInterest = Math.max(closeMaturityAfterTax - closePrincipalAmount, 0)
+  const selectedEffectiveMaturityDate = selectedDeposit ? getEffectiveMaturityDate(selectedDeposit) : ''
+  const isClosingSelectedDeposit = closingInvestmentId === selectedDeposit?.id
+
+  const openCloseInvestmentPanel = () => {
+    if (!selectedDeposit) {
+      return
+    }
+
+    setCloseTargetId(selectedDeposit.id)
+    setCloseError('')
+    setCloseDraft({
+      closureDate: selectedDeposit.closureDate || toInputDate(new Date(todayTime)),
+      maturityBeforeTax: selectedDeposit.maturityBeforeTax || '',
+      maturityAfterTax: selectedDeposit.maturityAfterTax || '',
+      notes: selectedDeposit.notes || '',
+    })
+  }
+
+  const cancelCloseInvestment = () => {
+    setCloseTargetId('')
+    setCloseError('')
+  }
+
+  const handleCloseDraftChange = (event) => {
+    const { name, value } = event.target
+    setCloseDraft((current) => ({
+      ...current,
+      [name]: value,
+    }))
+    setCloseError('')
+  }
+
+  const submitCloseInvestment = async (event) => {
+    event.preventDefault()
+
+    if (!selectedDeposit) {
+      return
+    }
+
+    if (closeMaturityBeforeTax <= 0) {
+      setCloseError('Enter maturity amount before TDS.')
+      return
+    }
+    if (closeMaturityAfterTax <= 0) {
+      setCloseError('Enter maturity amount received after TDS.')
+      return
+    }
+    if (closeMaturityBeforeTax < closePrincipalAmount) {
+      setCloseError('Maturity before TDS cannot be less than principal.')
+      return
+    }
+    if (closeMaturityAfterTax > closeMaturityBeforeTax) {
+      setCloseError('Maturity after TDS cannot exceed maturity before TDS.')
+      return
+    }
+    if (!closeDraft.closureDate) {
+      setCloseError('Enter the date cash was received.')
+      return
+    }
+    if (
+      selectedDeposit.investmentDate &&
+      new Date(`${closeDraft.closureDate}T00:00:00`).getTime() <
+        new Date(`${selectedDeposit.investmentDate}T00:00:00`).getTime()
+    ) {
+      setCloseError('Closure date cannot be before investment date.')
+      return
+    }
+    if (new Date(`${closeDraft.closureDate}T00:00:00`).getTime() > todayTime) {
+      setCloseError('Closure date cannot be in the future.')
+      return
+    }
+
+    try {
+      await closeInvestment(selectedDeposit, closeDraft)
+      setCloseTargetId('')
+      setCloseError('')
+    } catch (error) {
+      setCloseError(error.message)
+    }
+  }
 
   const detailTimelineItems = selectedDeposit
     ? [
         {
           key: `maturity-${selectedDeposit.id}`,
           kind: 'Maturity',
-          date: selectedDeposit.maturityDate,
+          date: selectedEffectiveMaturityDate,
           amount:
             selectedDeposit.maturityAfterTax ||
             selectedDeposit.maturityBeforeTax ||
@@ -1055,6 +1167,11 @@ export default function DepositsView({
               <button type="button" className="secondary-btn compact" onClick={() => startEditing(selectedDeposit)}>
                 Edit
               </button>
+              {canCloseSelectedDeposit && (
+                <button type="button" className="primary-btn compact" onClick={openCloseInvestmentPanel}>
+                  Close investment
+                </button>
+              )}
               <button type="button" className="secondary-btn compact" onClick={startArchive}>
                 Archive
               </button>
@@ -1078,6 +1195,11 @@ export default function DepositsView({
                 <button type="button" className="secondary-btn compact" onClick={() => startEditing(selectedDeposit)}>
                   Edit
                 </button>
+                {canCloseSelectedDeposit && (
+                  <button type="button" className="primary-btn compact" onClick={openCloseInvestmentPanel}>
+                    Close investment
+                  </button>
+                )}
                 <button type="button" className="secondary-btn compact" onClick={startArchive}>
                   Archive
                 </button>
@@ -1097,7 +1219,7 @@ export default function DepositsView({
               </span>
             </div>
             <div className="detail-grid detail-grid-compact">
-              <div><span>Next maturity</span><strong>{formatDate(selectedDeposit.maturityDate)}</strong></div>
+              <div><span>{isClosedDeposit ? 'Cash received on' : 'Next maturity'}</span><strong>{formatDate(selectedEffectiveMaturityDate)}</strong></div>
               {isPeriodicDeposit && (
                 <div><span>Next payout schedule</span><strong>{getPayoutModeLabel(selectedDeposit)}</strong></div>
               )}
@@ -1107,7 +1229,7 @@ export default function DepositsView({
               <div><span>Interest rate</span><strong>{formatInterestRate(selectedDeposit.interestRate)}</strong></div>
             </div>
           </div>
-          {nextActionConfig ? (
+          {nextActionConfig && closeTargetId !== selectedDeposit.id ? (
             <div className="deposit-next-action-card">
               <div>
                 <span>Next action</span>
@@ -1120,6 +1242,103 @@ export default function DepositsView({
                 </button>
               ) : null}
             </div>
+          ) : null}
+          {closeTargetId === selectedDeposit.id ? (
+            <form className="close-investment-card" onSubmit={submitCloseInvestment}>
+              <div className="section-head section-head-split">
+                <div>
+                  <h3>Close investment</h3>
+                  <p>Enter the final maturity values from the institution. These values make maturity cash available for reinvestment tracking.</p>
+                </div>
+                <button
+                  type="button"
+                  className="secondary-btn compact ghost-btn"
+                  onClick={cancelCloseInvestment}
+                  disabled={isClosingSelectedDeposit}
+                >
+                  Cancel
+                </button>
+              </div>
+              <div className="close-investment-context">
+                <p><span>Institution</span><strong>{selectedDeposit.bankName}</strong></p>
+                <p><span>Reference</span><strong>{selectedDeposit.accountNumber}</strong></p>
+                <p><span>Holder</span><strong>{selectedDeposit.holderName}</strong></p>
+                <p><span>Principal</span><strong>{formatCurrency(selectedDeposit.principalAmount)}</strong></p>
+                <p><span>Original maturity</span><strong>{formatDate(selectedDeposit.maturityDate)}</strong></p>
+                <p><span>Interest rate</span><strong>{formatInterestRate(selectedDeposit.interestRate)}</strong></p>
+              </div>
+              <div className="editor-grid">
+                <label className="field">
+                  <span>Closure date</span>
+                  <input
+                    name="closureDate"
+                    type="date"
+                    value={closeDraft.closureDate}
+                    onChange={handleCloseDraftChange}
+                    autoComplete="off"
+                  />
+                </label>
+                <label className="field">
+                  <span>Maturity before TDS</span>
+                  <input
+                    name="maturityBeforeTax"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={closeDraft.maturityBeforeTax}
+                    onChange={handleCloseDraftChange}
+                    autoComplete="off"
+                  />
+                </label>
+                <label className="field">
+                  <span>Maturity received after TDS</span>
+                  <input
+                    name="maturityAfterTax"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={closeDraft.maturityAfterTax}
+                    onChange={handleCloseDraftChange}
+                    autoComplete="off"
+                  />
+                </label>
+                <label className="field full">
+                  <span>Closure notes</span>
+                  <textarea
+                    name="notes"
+                    value={closeDraft.notes}
+                    onChange={handleCloseDraftChange}
+                    placeholder="Optional bank reference or closure note"
+                  />
+                </label>
+              </div>
+              <div className="close-investment-preview">
+                <div><span>Gross interest</span><strong>{formatCurrency(closeGrossInterest)}</strong></div>
+                <div><span>TDS deducted</span><strong>{formatCurrency(closeTdsDeducted)}</strong></div>
+                <div><span>Net interest after TDS</span><strong>{formatCurrency(closeNetInterest)}</strong></div>
+                <div><span>Cash available after closure</span><strong>{formatCurrency(closeMaturityAfterTax)}</strong></div>
+              </div>
+              {closeDraft.closureDate && closeDraft.closureDate < selectedDeposit.maturityDate ? (
+                <p className="inline-warning">
+                  This is a premature closure. Cashflow and FY receipt views will use the closure date, while the original maturity date stays unchanged.
+                </p>
+              ) : null}
+              {new Date(`${selectedDeposit.maturityDate}T00:00:00`).getTime() > todayTime ? (
+                <p className="inline-warning">
+                  This maturity date is in the future. Close only if the institution has already paid.
+                </p>
+              ) : null}
+              {closeError ? <p className="field-error">{closeError}</p> : null}
+              <div className="inline-action-buttons">
+                <button
+                  type="submit"
+                  className="primary-btn compact-btn"
+                  disabled={isClosingSelectedDeposit}
+                >
+                  {isClosingSelectedDeposit ? 'Closing...' : 'Close investment'}
+                </button>
+              </div>
+            </form>
           ) : null}
           {showCashStatusSummary ? (
           <div className="interest-summary-grid">
@@ -1208,6 +1427,9 @@ export default function DepositsView({
                   )}
                   <div><span>Invested on</span><strong>{formatDate(selectedDeposit.investmentDate)}</strong></div>
                   <div><span>Matures on</span><strong>{formatDate(selectedDeposit.maturityDate)}</strong></div>
+                  {isClosedDeposit && selectedDeposit.closureDate && (
+                    <div><span>Closed on</span><strong>{formatDate(selectedDeposit.closureDate)}</strong></div>
+                  )}
                   {hasPositiveAmount(selectedDeposit.maturityBeforeTax) && (
                     <div><span>{isClosedDeposit ? 'Maturity before TDS' : 'Expected maturity before TDS'}</span><strong>{formatCurrency(selectedDeposit.maturityBeforeTax)}</strong></div>
                   )}
@@ -1390,6 +1612,9 @@ export default function DepositsView({
                 )}
                 <div><span>Invested on</span><strong>{formatDate(selectedDeposit.investmentDate)}</strong></div>
                 <div><span>Matures on</span><strong>{formatDate(selectedDeposit.maturityDate)}</strong></div>
+                {isClosedDeposit && selectedDeposit.closureDate && (
+                  <div><span>Closed on</span><strong>{formatDate(selectedDeposit.closureDate)}</strong></div>
+                )}
                 {hasPositiveAmount(selectedDeposit.maturityBeforeTax) && (
                   <div><span>{isClosedDeposit ? 'Maturity before TDS' : 'Expected maturity before TDS'}</span><strong>{formatCurrency(selectedDeposit.maturityBeforeTax)}</strong></div>
                 )}

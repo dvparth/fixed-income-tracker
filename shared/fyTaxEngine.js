@@ -253,6 +253,22 @@ const createFinancialYearAccumulator = () => ({
   interestPaid: 0,
 })
 
+const getActualGrossInterest = (investment, principal, payoutFrequency) => {
+  const status = String(investment.status || '').trim().toLowerCase()
+  const maturityBeforeTax = Number(investment.maturityBeforeTax)
+
+  if (
+    status !== 'closed' ||
+    payoutFrequency !== 'CUMULATIVE' ||
+    !Number.isFinite(maturityBeforeTax) ||
+    maturityBeforeTax <= 0
+  ) {
+    return null
+  }
+
+  return Math.max(maturityBeforeTax - principal, 0)
+}
+
 const addToFinancialYearMap = (map, financialYear, field, amount) => {
   const entry = map.get(financialYear) || createFinancialYearAccumulator()
   entry[field] += amount
@@ -415,6 +431,22 @@ const buildDailyAccrualTimeline = (investment, selectedFinancialYear = null) => 
       totalInterest: roundAmount(entry.interestAccrued),
     }))
     .sort((left, right) => left.financialYear.localeCompare(right.financialYear))
+  const actualGrossInterest = getActualGrossInterest(investment, originalPrincipal, payoutFrequency)
+  const actualInterestScale =
+    actualGrossInterest !== null && totalInterest > 0 ? actualGrossInterest / totalInterest : 1
+  const selectedFinancialYearActualInterest =
+    selectedFinancialYearInterestAccrued * actualInterestScale
+  const selectedFinancialYearActualInterestPaid =
+    selectedFinancialYearInterestPaid * actualInterestScale
+  const adjustedAccrualByFinancialYear =
+    actualGrossInterest === null
+      ? accrualByFinancialYear
+      : accrualByFinancialYear.map((entry) => ({
+          ...entry,
+          interestAccrued: roundAmount(entry.interestAccrued * actualInterestScale),
+          interestPaid: roundAmount(entry.interestPaid * actualInterestScale),
+          totalInterest: roundAmount(entry.totalInterest * actualInterestScale),
+        }))
 
   return {
     valid: true,
@@ -422,21 +454,21 @@ const buildDailyAccrualTimeline = (investment, selectedFinancialYear = null) => 
     maturityDate,
     principal,
     annualRate,
-    accrualByFinancialYear,
-    totalInterest: roundAmount(totalInterest),
+    accrualByFinancialYear: adjustedAccrualByFinancialYear,
+    totalInterest: actualGrossInterest === null ? roundAmount(totalInterest) : roundAmount(actualGrossInterest),
     selectedFinancialYearInterest: hasSelectedFinancialYearOverlap
-      ? roundAmount(selectedFinancialYearInterestAccrued)
+      ? roundAmount(selectedFinancialYearActualInterest)
       : 0,
     selectedFinancialYearBreakdown: {
       financialYear: selectedFinancialYear?.label || '',
       interestAccrued: hasSelectedFinancialYearOverlap
-        ? roundAmount(selectedFinancialYearInterestAccrued)
+        ? roundAmount(selectedFinancialYearActualInterest)
         : 0,
       interestPaid: hasSelectedFinancialYearOverlap
-        ? roundAmount(selectedFinancialYearInterestPaid)
+        ? roundAmount(selectedFinancialYearActualInterestPaid)
         : 0,
       totalInterest: hasSelectedFinancialYearOverlap
-        ? roundAmount(selectedFinancialYearInterestAccrued)
+        ? roundAmount(selectedFinancialYearActualInterest)
         : 0,
     },
     calculationFrequency,
@@ -468,6 +500,8 @@ const createZeroBreakdown = ({
     : 0,
   valueDate: investment.valueDate || investment.investmentDate || '',
   maturityDate: investment.maturityDate || '',
+  contractualMaturityDate: investment.contractualMaturityDate || investment.maturityDate || '',
+  closureDate: investment.closureDate || '',
   financialYear: fy.label,
   estimatedInterestPaid: 0,
   estimatedInterestAccrued: 0,
@@ -565,6 +599,8 @@ export const estimateInvestmentTaxView = (investment, selectedFY, ownerTaxProfil
     interestRate: Number(investment.annualRate || investment.interestRate),
     valueDate: toYmd(timeline.valueDate),
     maturityDate: toYmd(timeline.maturityDate),
+    contractualMaturityDate: investment.contractualMaturityDate || investment.maturityDate || '',
+    closureDate: investment.closureDate || '',
     financialYear: fy.label,
     estimatedInterestPaid: selectedYearBreakdown.interestPaid,
     estimatedInterestAccrued: estimatedTotalInterest,

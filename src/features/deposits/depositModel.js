@@ -27,6 +27,7 @@ export const emptyForm = {
   principalAmount: '',
   investmentDate: '',
   maturityDate: '',
+  closureDate: '',
   maturityBeforeTax: '',
   maturityAfterTax: '',
   totalInterestEarned: '',
@@ -286,6 +287,9 @@ export const getDateSortValue = (value) => {
   return Number.isNaN(time) ? Number.MAX_SAFE_INTEGER : time
 }
 
+export const getEffectiveMaturityDate = (deposit) =>
+  deposit?.status === 'Closed' && deposit?.closureDate ? deposit.closureDate : deposit?.maturityDate
+
 export const getPostTdsAmount = (deposit) => {
   if (deposit.maturityAfterTax !== '' && deposit.maturityAfterTax !== null && deposit.maturityAfterTax !== undefined) {
     return Number(deposit.maturityAfterTax)
@@ -319,6 +323,7 @@ export const hydrateDeposit = (deposit) => {
       calculationFrequency: 'QUARTERLY',
       payoutMode: 'on-maturity',
       yearlyPayoutMonthDay: '',
+      closureDate: '',
       interestPayoutBeforeTds: '',
       interestPayoutAfterTds: '',
       tenureYears: tenure.years,
@@ -334,6 +339,7 @@ export const hydrateDeposit = (deposit) => {
       calculationFrequency: deposit.calculationFrequency || 'QUARTERLY',
       payoutMode: deposit.payoutMode || 'on-maturity',
       yearlyPayoutMonthDay: deposit.yearlyPayoutMonthDay || '',
+      closureDate: deposit.closureDate || '',
       interestPayoutBeforeTds: deposit.interestPayoutBeforeTds ?? '',
       interestPayoutAfterTds: deposit.interestPayoutAfterTds ?? '',
       tenureYears: tenure.years,
@@ -401,18 +407,19 @@ export const createInterestEvent = (deposit, date) => {
 
 export const generateInterestEvents = (deposit) => {
   const payoutMode = getEffectivePayoutMode(deposit)
+  const eventEndDate = getEffectiveMaturityDate(deposit)
 
   if (
     payoutMode === 'on-maturity' ||
     !deposit.investmentDate ||
-    !deposit.maturityDate ||
+    !eventEndDate ||
     deposit.interestPayoutAfterTds === ''
   ) {
     return []
   }
 
   const investmentDate = new Date(`${deposit.investmentDate}T00:00:00`)
-  const maturityDate = new Date(`${deposit.maturityDate}T00:00:00`)
+  const maturityDate = new Date(`${eventEndDate}T00:00:00`)
   const events = []
 
   if (payoutMode === 'quarterly-fy') {
@@ -447,6 +454,7 @@ export const generateInterestEvents = (deposit) => {
 export const normalizeDeposit = (formValues, existingId, fallbackSrNo, existingDeposit = null) => {
   const holderName = formValues.holderName.trim()
   const maturityDate = formValues.maturityDate
+  const closureDate = String(formValues.closureDate || '').trim()
   const principalAmount = parseNumber(formValues.principalAmount)
   const maturityAfterTax = parseNumber(formValues.maturityAfterTax)
   const maturityBeforeTax = parseNumber(formValues.maturityBeforeTax)
@@ -480,6 +488,7 @@ export const normalizeDeposit = (formValues, existingId, fallbackSrNo, existingD
     principalAmount,
     investmentDate: formValues.investmentDate,
     maturityDate,
+    closureDate,
     maturityBeforeTax,
     maturityAfterTax,
     totalInterestEarned: computedInterest,
