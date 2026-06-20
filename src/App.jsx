@@ -1262,6 +1262,7 @@ function App() {
         const principalAmount = Number(deposit.principalAmount || 0)
         const maturityBeforeTax = Number(deposit.maturityBeforeTax || 0)
         const grossInterestAmount = Math.max(maturityBeforeTax - principalAmount, 0)
+        const netInterestAmount = Math.max(Number(deposit.maturityAfterTax || 0) - principalAmount, 0)
         const realizationDate = getEffectiveMaturityDate(deposit)
 
         return {
@@ -1273,6 +1274,8 @@ function App() {
           closureDate: deposit.closureDate || '',
           amount: grossInterestAmount,
           grossAmount: grossInterestAmount,
+          netAmount: netInterestAmount,
+          tdsAmount: Math.max(grossInterestAmount - netInterestAmount, 0),
           holderName: deposit.holderName,
           bankName: deposit.bankName,
           accountNumber: deposit.accountNumber,
@@ -1285,19 +1288,36 @@ function App() {
       .filter((event) => event.amount > 0 || event.grossAmount > 0)
     const periodicInterestRealizationEvents = dashboardScopedCashFlowEvents
       .filter((event) => event.type === 'Interest' && isWithinCurrentFy(event.date))
-      .map((event) => ({
-        ...event,
-        type: 'Periodic interest',
-        amount: Number(event.grossAmount || 0),
-        instrumentType: event.sourceLabel || 'Interest payout',
-        receiptCount: 1,
-      }))
+      .map((event) => {
+        const grossAmount = Number(event.grossAmount || 0)
+        const netAmount = Number(event.amount || 0)
+
+        return {
+          ...event,
+          type: 'Periodic interest',
+          amount: grossAmount,
+          grossAmount,
+          netAmount,
+          tdsAmount: Math.max(grossAmount - netAmount, 0),
+          instrumentType: event.sourceLabel || 'Interest payout',
+          receiptCount: 1,
+        }
+      })
     const interestRealizationEvents = [
       ...maturityInterestRealizationEvents,
       ...periodicInterestRealizationEvents,
     ].sort((left, right) => new Date(left.date) - new Date(right.date))
-    const realisedInterest = interestRealizationEvents.reduce(
+    const realizedInterestToDateEvents = interestRealizationEvents.filter((event) => new Date(event.date) <= TODAY)
+    const realisedInterest = realizedInterestToDateEvents.reduce(
       (sum, event) => sum + Number(event.amount || 0),
+      0,
+    )
+    const realisedInterestTds = realizedInterestToDateEvents.reduce(
+      (sum, event) => sum + Number(event.tdsAmount || 0),
+      0,
+    )
+    const realisedNetInterest = realizedInterestToDateEvents.reduce(
+      (sum, event) => sum + Number(event.netAmount ?? event.amount ?? 0),
       0,
     )
     const maturedWithPostTds = dashboardScopedCashFlowEvents.filter(
@@ -1509,6 +1529,8 @@ function App() {
       closedDeposits: closedDeposits.length,
       openPrincipal,
       realisedInterest,
+      realisedInterestTds,
+      realisedNetInterest,
       upcomingCashNext30Days: upcomingCashFlowNext30Days.reduce(
         (sum, event) => sum + Number(event.amount || 0),
         0,
@@ -1523,7 +1545,7 @@ function App() {
       maturityAwaitingReinvestment,
       uninvestedInterestCash,
       futureInterestCash,
-      interestRealizationEvents,
+      interestRealizationEvents: realizedInterestToDateEvents,
       dueInterestAwaitingReinvestment,
       dueInterestAwaitingReinvestmentSummary,
       upcomingInterestEvents,
@@ -2779,7 +2801,7 @@ function App() {
   const helpCopy = {
     'active-principal': 'This is the total amount currently invested in open deposits.',
     'interest-realised':
-      'Gross interest scheduled in the selected FY, before TDS, regardless of which FY it is taxable in.',
+      'Actual gross interest earned to date in the selected FY, before TDS.',
     'unused-maturity-cash':
       'This is maturity cash already received and available to reinvest.',
     'interest-not-reused': 'This is interest cash already received and available to reinvest.',
@@ -2791,7 +2813,7 @@ function App() {
         : 'These are the next deposits that will mature soon.',
     'interest-section':
       interestFocusMode === 'realizing'
-        ? 'These are gross interest receipts scheduled in the selected FY, including maturity interest and periodic payouts.'
+        ? 'These are actual gross interest receipts earned to date in the selected FY, including maturity interest and periodic payouts.'
         : interestFocusMode === 'pending'
         ? 'These are interest amounts already received and still available to reinvest.'
         : 'These are upcoming interest payouts from deposits that pay before maturity.',
@@ -3053,11 +3075,6 @@ function App() {
 
   const showUnusedInterestDrilldown = () => {
     setInterestFocusMode('pending')
-    scrollToDashboardSection('dashboard-interest-section')
-  }
-
-  const showUpcomingInterestDrilldown = () => {
-    setInterestFocusMode('all')
     scrollToDashboardSection('dashboard-interest-section')
   }
 
@@ -3665,17 +3682,30 @@ function App() {
                 <small>{stats.openDeposits} active</small>
               </article>
               <article
-                className="stat-card stat-card-action clickable-surface"
+                className="stat-card stat-card-action stat-card-wide fy-interest-card clickable-surface"
                 role="button"
                 tabIndex={0}
                 onClick={showRealizedInterestDrilldown}
                 onKeyDown={(event) => handleActionCardKeyDown(event, showRealizedInterestDrilldown)}
               >
                 <span className="stat-label-row">
-                  <span>Gross interest receipts this FY</span>
-                  {renderHelpHint('interest-realised', 'Gross interest scheduled in the selected FY, before TDS, regardless of which FY it is taxable in.')}
+                  <span>Interest earned to date this FY</span>
+                  {renderHelpHint('interest-realised', 'Actual gross interest earned to date in the selected FY, before TDS.')}
                 </span>
-                <strong>{formatCurrency(stats.realisedInterest)}</strong>
+                <div className="stat-metric-grid">
+                  <div className="stat-metric-primary">
+                    <span>Gross</span>
+                    <strong>{formatCurrency(stats.realisedInterest)}</strong>
+                  </div>
+                  <div>
+                    <span>TDS deducted</span>
+                    <strong>{formatCurrency(stats.realisedInterestTds)}</strong>
+                  </div>
+                  <div>
+                    <span>Net</span>
+                    <strong>{formatCurrency(stats.realisedNetInterest)}</strong>
+                  </div>
+                </div>
                 <small>FY {stats.currentFinancialYearLabel} | View receipts</small>
               </article>
               <article
@@ -3705,20 +3735,6 @@ function App() {
                 </span>
                 <strong>{formatCurrency(stats.uninvestedInterestCash)}</strong>
                 <small>FY {stats.currentFinancialYearLabel} | View investments</small>
-              </article>
-              <article
-                className="stat-card stat-card-action clickable-surface"
-                role="button"
-                tabIndex={0}
-                onClick={showUpcomingInterestDrilldown}
-                onKeyDown={(event) => handleActionCardKeyDown(event, showUpcomingInterestDrilldown)}
-              >
-                <span className="stat-label-row">
-                  <span>Upcoming interest payouts</span>
-                  {renderHelpHint('upcoming-interest', 'This only shows future interest for deposits that pay interest before maturity, like quarterly or yearly payout products.')}
-                </span>
-                <strong>{formatCurrency(stats.futureInterestCash)}</strong>
-                <small>FY {stats.currentFinancialYearLabel} | View schedule</small>
               </article>
             </div>
 
@@ -3849,7 +3865,7 @@ function App() {
                   <div className="section-title-row">
                     <h2>
                       {interestFocusMode === 'realizing'
-                        ? 'Gross interest receipts this FY'
+                        ? 'Interest earned to date this FY'
                         : interestFocusMode === 'pending'
                           ? 'Interest to reinvest'
                           : 'Interest timeline'}
@@ -3857,7 +3873,7 @@ function App() {
                     {renderHelpHint(
                       'interest-section',
                       interestFocusMode === 'realizing'
-                        ? 'Gross interest scheduled in the selected FY, before TDS, regardless of which FY it is taxable in.'
+                        ? 'Actual gross interest earned to date in the selected FY, before TDS.'
                         : interestFocusMode === 'pending'
                         ? 'These are interest amounts already received but not yet fully used in new deposits.'
                         : 'These are future interest payouts expected from deposits that pay before maturity.',
@@ -3865,7 +3881,7 @@ function App() {
                   </div>
                   <p>
                     {interestFocusMode === 'realizing'
-                      ? 'Maturity interest and periodic payouts scheduled in the selected FY, shown before TDS.'
+                      ? 'Maturity interest and periodic payouts earned so far in the selected FY, shown before TDS.'
                       : interestFocusMode === 'pending'
                       ? 'Interest cash already received and available to reinvest.'
                       : 'Upcoming interest payouts that may be reused.'}

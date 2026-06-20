@@ -1206,6 +1206,10 @@
   gap: 10px;
 }
 
+.stat-card-wide {
+  grid-column: span 2;
+}
+
 .tax-panel {
   display: grid;
   gap: 15px;
@@ -1860,6 +1864,35 @@
   color: var(--text-muted);
   font-size: 0.7rem;
   line-height: 1.2;
+}
+
+.stat-metric-grid {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.2fr) repeat(2, minmax(92px, 0.8fr));
+  gap: 10px;
+  align-items: end;
+  min-width: 0;
+}
+
+.stat-metric-grid div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.stat-metric-grid span {
+  color: var(--text-muted);
+  font-size: 0.66rem;
+  line-height: 1.15;
+}
+
+.stat-metric-grid strong {
+  font-size: 0.92rem;
+  overflow-wrap: anywhere;
+}
+
+.stat-metric-primary strong {
+  font-size: 1.04rem;
 }
 
 .panel {
@@ -3925,6 +3958,14 @@
 
   .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stat-card-wide {
+    grid-column: span 2;
+  }
+
+  .stat-metric-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .tax-summary-grid,
