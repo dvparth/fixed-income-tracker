@@ -528,6 +528,7 @@ function App() {
   const [isArchiving, setIsArchiving] = useState(false)
   const [deleteTargetId, setDeleteTargetId] = useState(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [renewingInvestmentId, setRenewingInvestmentId] = useState('')
   const [settlingEventId, setSettlingEventId] = useState('')
   const [closingInvestmentId, setClosingInvestmentId] = useState('')
   const [isLoading, setIsLoading] = useState(true)
@@ -1676,6 +1677,34 @@ function App() {
     notes: deposit.notes ?? '',
   })
 
+  const addTenureToDate = (dateValue, deposit) => {
+    if (!dateValue) {
+      return ''
+    }
+
+    const baseDate = new Date(`${dateValue}T00:00:00`)
+    if (Number.isNaN(baseDate.getTime())) {
+      return ''
+    }
+
+    const tenure = deriveTenureParts(deposit.investmentDate, deposit.maturityDate)
+    const years = Number(tenure.years || 0)
+    const months = Number(tenure.months || 0)
+    const days = Number(tenure.days || 0)
+    const targetMonthIndex = baseDate.getMonth() + months
+    const targetYear = baseDate.getFullYear() + years + Math.floor(targetMonthIndex / 12)
+    const normalizedMonthIndex = ((targetMonthIndex % 12) + 12) % 12
+    const daysInTargetMonth = new Date(targetYear, normalizedMonthIndex + 1, 0).getDate()
+    const targetDate = new Date(
+      targetYear,
+      normalizedMonthIndex,
+      Math.min(baseDate.getDate(), daysInTargetMonth),
+    )
+    targetDate.setDate(targetDate.getDate() + days)
+
+    return toYmd(targetDate)
+  }
+
   const startNewDeposit = () => {
     if (!canEditPortfolio) {
       return
@@ -1822,6 +1851,118 @@ function App() {
       allocationsText: '',
       notes: '',
     })
+  }
+
+  const renewInvestment = async (deposit, renewalValues) => {
+    if (!canEditPortfolio || !deposit?.id || renewingInvestmentId) {
+      return null
+    }
+
+    const renewalInvestmentDate = deposit.maturityDate || getEffectiveMaturityDate(deposit)
+    const renewalMaturityDate = addTenureToDate(renewalInvestmentDate, deposit)
+    const principalAmount = Number(renewalValues?.principalAmount || 0)
+    const maturityBeforeTax = Number(renewalValues?.maturityBeforeTax || 0)
+    const actualMaturityCash = Number(renewalValues?.actualMaturityCash || 0)
+
+    if (!renewalInvestmentDate) {
+      throw new Error('Existing investment does not have a maturity date to renew from.')
+    }
+    if (!renewalMaturityDate) {
+      throw new Error('Could not calculate the renewed maturity date from the existing tenure.')
+    }
+    if (principalAmount <= 0) {
+      throw new Error('Enter the new investment amount.')
+    }
+    if (maturityBeforeTax <= 0) {
+      throw new Error('Enter the new maturity value.')
+    }
+    if (actualMaturityCash <= 0) {
+      throw new Error('Enter the actual maturity cash received.')
+    }
+    if (principalAmount > actualMaturityCash) {
+      throw new Error('New investment value cannot exceed actual maturity cash.')
+    }
+
+    const closingMaturityBeforeTax = Math.max(Number(deposit.maturityBeforeTax || 0), actualMaturityCash)
+    const closedFormValues = {
+      ...mapDepositToFormValues(deposit),
+      closureDate: renewalInvestmentDate,
+      maturityBeforeTax: closingMaturityBeforeTax,
+      maturityAfterTax: actualMaturityCash,
+      status: 'Closed',
+    }
+    const closedDeposit = hydrateDeposit(
+      normalizeDeposit(closedFormValues, deposit.id, deposit.srNo || nextSrNo, deposit),
+    )
+    const allocationsText = formatAllocationsText([
+      {
+        eventId: getMaturitySourceEventId(deposit.id),
+        amount: principalAmount,
+      },
+    ])
+    const nextFormValues = {
+      ...mapDepositToFormValues(deposit),
+      srNo: '',
+      principalAmount,
+      investmentDate: renewalInvestmentDate,
+      maturityDate: renewalMaturityDate,
+      closureDate: '',
+      maturityBeforeTax,
+      maturityAfterTax: '',
+      totalInterestEarned: '',
+      tdsAmount: '',
+      status: 'Open',
+      allocationsText,
+      notes: '',
+    }
+    const normalized = normalizeDeposit(nextFormValues, null, nextSrNo)
+
+    if (isDemoMode) {
+      const savedDeposit = hydrateDeposit(normalized)
+      startTransition(() => {
+        setDeposits((current) => [
+          savedDeposit,
+          ...current.map((currentDeposit) =>
+            currentDeposit.id === closedDeposit.id ? closedDeposit : currentDeposit,
+          ),
+        ])
+      })
+      focusDepositAfterSave(savedDeposit, true)
+      return savedDeposit
+    }
+
+    try {
+      setRenewingInvestmentId(deposit.id)
+      setLoadError('')
+      const savedClosedDeposit = hydrateDeposit(
+        await requestJson(buildOwnerScopedPath(`/api/deposits/${deposit.id}`, activePortfolioOwnerId), {
+          method: 'PUT',
+          body: JSON.stringify(closedDeposit),
+        }),
+      )
+      const savedDeposit = hydrateDeposit(
+        await requestJson(buildOwnerScopedPath('/api/deposits', activePortfolioOwnerId), {
+          method: 'POST',
+          body: JSON.stringify(normalized),
+        }),
+      )
+
+      startTransition(() => {
+        setDeposits((current) => [
+          savedDeposit,
+          ...current.map((currentDeposit) =>
+            currentDeposit.id === savedClosedDeposit.id ? savedClosedDeposit : currentDeposit,
+          ),
+        ])
+      })
+      focusDepositAfterSave(savedDeposit, true)
+      return savedDeposit
+    } catch (error) {
+      setLoadError(error.message)
+      throw error
+    } finally {
+      setRenewingInvestmentId('')
+    }
   }
 
   const openDepositFromInterestEvent = (event) => {
@@ -4131,6 +4272,8 @@ function App() {
           setMobileDepositsScreen={setMobileDepositsScreen}
           startCloning={startCloning}
           startEditing={startEditing}
+          renewInvestment={renewInvestment}
+          renewingInvestmentId={renewingInvestmentId}
           startArchive={startArchive}
           cancelArchive={cancelArchive}
           confirmArchive={confirmArchive}

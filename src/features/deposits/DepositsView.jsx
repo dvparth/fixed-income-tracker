@@ -65,6 +65,8 @@ export default function DepositsView({
   setMobileDepositsScreen,
   startCloning,
   startEditing,
+  renewInvestment,
+  renewingInvestmentId,
   startArchive,
   cancelArchive,
   confirmArchive,
@@ -103,6 +105,13 @@ export default function DepositsView({
     notes: '',
   })
   const [closeError, setCloseError] = useState('')
+  const [renewTargetId, setRenewTargetId] = useState('')
+  const [renewDraft, setRenewDraft] = useState({
+    principalAmount: '',
+    maturityBeforeTax: '',
+    actualMaturityCash: '',
+  })
+  const [renewError, setRenewError] = useState('')
   const hasViewFilters =
     hasActiveDepositFilters ||
     ownerFilter !== 'all' ||
@@ -135,6 +144,109 @@ export default function DepositsView({
     }
 
     return Math.max(totalInterestEarned, 0)
+  }
+
+  const getRenewalDefaultAmount = (deposit) => {
+    const maturityAfterTax = Number(deposit?.maturityAfterTax || 0)
+    if (maturityAfterTax > 0) {
+      return maturityAfterTax
+    }
+
+    const maturityBeforeTax = Number(deposit?.maturityBeforeTax || 0)
+    if (maturityBeforeTax > 0) {
+      return maturityBeforeTax
+    }
+
+    return Number(deposit?.principalAmount || 0)
+  }
+
+  const addExistingTenureToDate = (dateValue, deposit) => {
+    if (!dateValue) {
+      return ''
+    }
+
+    const baseDate = new Date(`${dateValue}T00:00:00`)
+    if (Number.isNaN(baseDate.getTime())) {
+      return ''
+    }
+
+    const targetMonthIndex = baseDate.getMonth() + Number(deposit?.tenureMonths || 0)
+    const targetYear =
+      baseDate.getFullYear() +
+      Number(deposit?.tenureYears || 0) +
+      Math.floor(targetMonthIndex / 12)
+    const normalizedMonthIndex = ((targetMonthIndex % 12) + 12) % 12
+    const daysInTargetMonth = new Date(targetYear, normalizedMonthIndex + 1, 0).getDate()
+    const targetDate = new Date(
+      targetYear,
+      normalizedMonthIndex,
+      Math.min(baseDate.getDate(), daysInTargetMonth),
+    )
+    targetDate.setDate(targetDate.getDate() + Number(deposit?.tenureDays || 0))
+
+    return toInputDate(targetDate)
+  }
+
+  const openRenewInvestmentPopup = (deposit) => {
+    const defaultAmount = getRenewalDefaultAmount(deposit)
+    setRenewTargetId(deposit.id)
+    setRenewDraft({
+      principalAmount: defaultAmount > 0 ? String(defaultAmount) : '',
+      maturityBeforeTax: defaultAmount > 0 ? String(defaultAmount) : '',
+      actualMaturityCash: defaultAmount > 0 ? String(defaultAmount) : '',
+    })
+    setRenewError('')
+  }
+
+  const cancelRenewInvestment = () => {
+    setRenewTargetId('')
+    setRenewDraft({
+      principalAmount: '',
+      maturityBeforeTax: '',
+      actualMaturityCash: '',
+    })
+    setRenewError('')
+  }
+
+  const handleRenewDraftChange = (event) => {
+    const { name, value } = event.target
+    setRenewDraft((current) => ({
+      ...current,
+      [name]: value,
+    }))
+    setRenewError('')
+  }
+
+  const submitRenewInvestment = async (event) => {
+    event.preventDefault()
+
+    if (!selectedDeposit || renewTargetId !== selectedDeposit.id) {
+      return
+    }
+
+    if (Number(renewDraft.principalAmount || 0) <= 0) {
+      setRenewError('Enter the new investment amount.')
+      return
+    }
+    if (Number(renewDraft.maturityBeforeTax || 0) <= 0) {
+      setRenewError('Enter the new maturity value.')
+      return
+    }
+    if (Number(renewDraft.actualMaturityCash || 0) <= 0) {
+      setRenewError('Enter the actual maturity cash received.')
+      return
+    }
+    if (Number(renewDraft.principalAmount || 0) > Number(renewDraft.actualMaturityCash || 0)) {
+      setRenewError('New investment value cannot exceed actual maturity cash.')
+      return
+    }
+
+    try {
+      await renewInvestment(selectedDeposit, renewDraft)
+      cancelRenewInvestment()
+    } catch (error) {
+      setRenewError(error.message)
+    }
   }
 
   const ownerOptions = useMemo(
@@ -178,6 +290,8 @@ export default function DepositsView({
     setExpandedTimelineItems({})
     setCloseTargetId('')
     setCloseError('')
+    setRenewTargetId('')
+    setRenewError('')
   }, [selectedId])
 
   const groupedDeposits = useMemo(() => {
@@ -691,6 +805,11 @@ export default function DepositsView({
   const closeNetInterest = Math.max(closeMaturityAfterTax - closePrincipalAmount, 0)
   const selectedEffectiveMaturityDate = selectedDeposit ? getEffectiveMaturityDate(selectedDeposit) : ''
   const isClosingSelectedDeposit = closingInvestmentId === selectedDeposit?.id
+  const renewalInvestmentDate = selectedDeposit?.maturityDate || ''
+  const renewalMaturityDate = selectedDeposit
+    ? addExistingTenureToDate(renewalInvestmentDate, selectedDeposit)
+    : ''
+  const isRenewingSelectedDeposit = renewingInvestmentId === selectedDeposit?.id
 
   const openCloseInvestmentPanel = () => {
     if (!selectedDeposit) {
@@ -1164,6 +1283,9 @@ export default function DepositsView({
               <button type="button" className="secondary-btn compact" onClick={() => startCloning(selectedDeposit)}>
                 Clone
               </button>
+              <button type="button" className="secondary-btn compact" onClick={() => openRenewInvestmentPopup(selectedDeposit)}>
+                Renew
+              </button>
               <button type="button" className="secondary-btn compact" onClick={() => startEditing(selectedDeposit)}>
                 Edit
               </button>
@@ -1192,6 +1314,9 @@ export default function DepositsView({
                 <button type="button" className="secondary-btn compact" onClick={() => startCloning(selectedDeposit)}>
                   Clone
                 </button>
+                <button type="button" className="secondary-btn compact" onClick={() => openRenewInvestmentPopup(selectedDeposit)}>
+                  Renew
+                </button>
                 <button type="button" className="secondary-btn compact" onClick={() => startEditing(selectedDeposit)}>
                   Edit
                 </button>
@@ -1211,6 +1336,90 @@ export default function DepositsView({
               </div>
             )}
           </div>
+          {!isReadOnly && renewTargetId === selectedDeposit.id && (
+            <div
+              className="about-modal-backdrop"
+              role="presentation"
+              onClick={isRenewingSelectedDeposit ? undefined : cancelRenewInvestment}
+            >
+              <form
+                className="about-modal panel renewal-modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="renew-investment-title"
+                onClick={(event) => event.stopPropagation()}
+                onSubmit={submitRenewInvestment}
+              >
+                <div className="section-head">
+                  <div>
+                    <h2 id="renew-investment-title">Renew investment</h2>
+                    <p>Creates a new investment using the existing maturity date and tenure.</p>
+                  </div>
+                </div>
+                <div className="close-investment-context renewal-context">
+                  <p><span>Existing maturity</span><strong>{formatDate(renewalInvestmentDate)}</strong></p>
+                  <p><span>New investment date</span><strong>{formatDate(renewalInvestmentDate)}</strong></p>
+                  <p><span>New maturity date</span><strong>{formatDate(renewalMaturityDate)}</strong></p>
+                </div>
+                <div className="editor-grid">
+                  <label className="field">
+                    <span>Actual maturity cash</span>
+                    <input
+                      name="actualMaturityCash"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={renewDraft.actualMaturityCash}
+                      onChange={handleRenewDraftChange}
+                      autoComplete="off"
+                    />
+                  </label>
+                  <label className="field">
+                    <span>New investment value</span>
+                    <input
+                      name="principalAmount"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={renewDraft.principalAmount}
+                      onChange={handleRenewDraftChange}
+                      autoComplete="off"
+                    />
+                  </label>
+                  <label className="field">
+                    <span>New maturity value</span>
+                    <input
+                      name="maturityBeforeTax"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={renewDraft.maturityBeforeTax}
+                      onChange={handleRenewDraftChange}
+                      autoComplete="off"
+                    />
+                  </label>
+                </div>
+                {renewError ? <p className="field-error">{renewError}</p> : null}
+                <div className="backup-confirm-modal-actions">
+                  <button
+                    type="button"
+                    className="secondary-btn compact ghost-btn"
+                    onClick={cancelRenewInvestment}
+                    disabled={isRenewingSelectedDeposit}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="primary-btn compact-btn"
+                    disabled={isRenewingSelectedDeposit}
+                  >
+                    {isRenewingSelectedDeposit ? 'Renewing...' : 'Create renewal'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
           <div className="deposit-detail-summary">
             <div className="deposit-detail-hero">
               <strong>{formatCurrency(selectedDeposit.principalAmount)}</strong>

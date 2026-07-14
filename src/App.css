@@ -830,6 +830,14 @@
   gap: 16px;
 }
 
+.renewal-modal {
+  width: min(100%, 620px);
+}
+
+.renewal-modal .section-head {
+  margin-bottom: 0;
+}
+
 .about-modal-copy {
   display: flex;
   align-items: center;
