@@ -46,6 +46,8 @@ export default function DepositEditorView({
   formatDate,
   formErrors,
   handleFormChange,
+  actualAccountNumber,
+  handleActualAccountNumberChange,
   handleMasterBoundFieldChange,
   effectiveEditorPayoutMode,
   isPeriodicEditor,
@@ -179,8 +181,9 @@ export default function DepositEditorView({
             </p>
             {!editingId && formValues.bankName && (
               <p className="inline-warning">
-                Clone mode keeps the reusable investment setup but clears account, dates,
-                maturity results, and funding lineage.
+                Clone mode keeps the reusable investment setup, investment and maturity dates,
+                and maturity before TDS. It clears the account, remaining maturity results, and
+                funding lineage.
               </p>
             )}
           </div>
@@ -759,14 +762,31 @@ export default function DepositEditorView({
                 </small>
               </label>
               <label className="field">
+                <span>Actual account number</span>
+                <input
+                  value={actualAccountNumber}
+                  onChange={handleActualAccountNumberChange}
+                  inputMode="numeric"
+                  placeholder="Used only to generate the account no."
+                  autoComplete="off"
+                />
+                <small className="field-help">
+                  This value is not saved.
+                </small>
+              </label>
+              <label className="field">
                 <span>Account or certificate no.</span>
                 <input
                   name="accountNumber"
                   value={formValues.accountNumber}
                   onChange={handleFormChange}
-                  placeholder="Optional"
+                  placeholder="Generated from issuer, instrument, and actual account number"
                   autoComplete="off"
                 />
+                <small className="field-help">
+                  Generated automatically and saved with the investment. You can edit it directly;
+                  changing the issuer, instrument, or actual account number regenerates it.
+                </small>
                 {formErrors.accountNumber && (
                   <small className="field-error">{formErrors.accountNumber}</small>
                 )}

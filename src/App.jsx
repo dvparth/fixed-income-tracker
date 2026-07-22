@@ -33,6 +33,30 @@ const DASHBOARD_PREVIEW_LIMIT = Math.floor(
 const DASHBOARD_UPCOMING_CASH_WINDOW_DAYS = Math.floor(
   parsePositiveEnvNumber('VITE_DASHBOARD_UPCOMING_CASH_WINDOW_DAYS', 30),
 )
+
+const deriveAccountOrCertificateNumber = (bankName, instrumentType, actualAccountNumber) => {
+  const issuer = String(bankName || '').trim()
+  const instrument = String(instrumentType || '').trim()
+
+  if (!issuer || !instrument) {
+    return ''
+  }
+
+  const rawAccountNumber = String(actualAccountNumber || '').trim()
+  let derivedValue = '0000'
+
+  if (/^\d+$/.test(rawAccountNumber)) {
+    derivedValue = ((BigInt(rawAccountNumber) * 2n) % 10000n).toString().padStart(4, '0')
+  } else {
+    const trailingDigits = rawAccountNumber.match(/(\d{1,4})$/)?.[1]
+    if (trailingDigits) {
+      derivedValue = ((Number(trailingDigits) * 2) % 10000).toString().padStart(4, '0')
+    }
+  }
+
+  return `${issuer}-${instrument.toLowerCase() === 'term deposit' ? 'FD' : instrument}-${derivedValue}`
+}
+
 const createEmptySessionState = () => ({
   authenticated: false,
   user: null,
@@ -521,6 +545,7 @@ function App() {
   const [depositFilterResetSeed, setDepositFilterResetSeed] = useState(0)
   const [editingId, setEditingId] = useState(null)
   const [formValues, setFormValues] = useState(emptyForm)
+  const [actualAccountNumber, setActualAccountNumber] = useState('')
   const [formErrors, setFormErrors] = useState({})
   const [selectedFundingEventId, setSelectedFundingEventId] = useState('')
   const [fundingAmountDraft, setFundingAmountDraft] = useState('')
@@ -1639,6 +1664,7 @@ function App() {
   const resetForm = () => {
     setEditingId(null)
     setFormValues(createFreshForm())
+    setActualAccountNumber('')
     setFormErrors({})
     setSelectedFundingEventId('')
     setFundingAmountDraft('')
@@ -1803,6 +1829,7 @@ function App() {
     setFormErrors({})
     setSelectedFundingEventId('')
     setFundingAmountDraft('')
+    setActualAccountNumber('')
     setFormValues(mapDepositToFormValues(deposit))
   }
 
@@ -1821,6 +1848,7 @@ function App() {
     setFormErrors({})
     setSelectedFundingEventId('')
     setFundingAmountDraft('')
+    setActualAccountNumber('')
     setFormValues({
       ...createFreshForm(),
       bankName: deposit.bankName ?? '',
@@ -1839,10 +1867,10 @@ function App() {
       tenureDays: deposit.tenureDays ?? '',
       interestRate: formatEditableNumber(deposit.interestRate),
       principalAmount: deposit.principalAmount ?? '',
-      investmentDate: '',
-      maturityDate: '',
+      investmentDate: deposit.investmentDate ?? '',
+      maturityDate: deposit.maturityDate ?? '',
       closureDate: '',
-      maturityBeforeTax: '',
+      maturityBeforeTax: deposit.maturityBeforeTax ?? '',
       maturityAfterTax: '',
       totalInterestEarned: '',
       tdsPercent: deposit.tdsPercent ?? '',
@@ -2137,6 +2165,13 @@ function App() {
 
     setFormValues((current) => {
       nextFormValues = { ...current, [name]: value }
+      if (name === 'instrumentType') {
+        nextFormValues.accountNumber = deriveAccountOrCertificateNumber(
+          current.bankName,
+          value,
+          actualAccountNumber,
+        )
+      }
       return nextFormValues
     })
 
@@ -2205,6 +2240,11 @@ function App() {
           String(nextBankName || '').trim().toLowerCase()
             ? current.branchCity
             : '',
+        accountNumber: deriveAccountOrCertificateNumber(
+          nextBankName,
+          current.instrumentType,
+          actualAccountNumber,
+        ),
       }))
       setFormErrors((current) => {
         if (!current.bankName) {
@@ -2219,6 +2259,19 @@ function App() {
     }
 
     handleFormChange(event)
+  }
+
+  const handleActualAccountNumberChange = (event) => {
+    const value = event.target.value
+    setActualAccountNumber(value)
+    setFormValues((current) => ({
+      ...current,
+      accountNumber: deriveAccountOrCertificateNumber(
+        current.bankName,
+        current.instrumentType,
+        value,
+      ),
+    }))
   }
 
   const handleFundingSourceSelect = (event) => {
@@ -2552,6 +2605,7 @@ function App() {
     setEditorReturnDepositsScreen('detail')
     setEditingId(null)
     setFormErrors({})
+    setActualAccountNumber('')
     setSelectedFundingEventId('')
     setFundingAmountDraft('')
     const suggestedAmount = Number(
@@ -2718,6 +2772,7 @@ function App() {
     setEditorReturnDepositsScreen('detail')
     setEditingId(null)
     setFormErrors({})
+    setActualAccountNumber('')
     setSelectedFundingEventId('')
     setFundingAmountDraft('')
     const payout =
@@ -2769,6 +2824,7 @@ function App() {
     setEditorReturnDepositsScreen('detail')
     setEditingId(null)
     setFormErrors({})
+    setActualAccountNumber('')
     setSelectedFundingEventId('')
     setFundingAmountDraft('')
     setFormValues({
@@ -4318,6 +4374,8 @@ function App() {
           formatDate={formatDate}
           formErrors={formErrors}
           handleFormChange={handleFormChange}
+          actualAccountNumber={actualAccountNumber}
+          handleActualAccountNumberChange={handleActualAccountNumberChange}
           handleMasterBoundFieldChange={handleMasterBoundFieldChange}
           effectiveEditorPayoutMode={effectiveEditorPayoutMode}
           isPeriodicEditor={isPeriodicEditor}
