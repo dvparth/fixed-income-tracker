@@ -1218,6 +1218,10 @@
   grid-column: span 2;
 }
 
+.stat-card-wider {
+  grid-column: span 3;
+}
+
 .tax-panel {
   display: grid;
   gap: 15px;
@@ -1714,6 +1718,107 @@
   margin: 2px 0 0;
   color: var(--text-muted);
   font-size: 0.82rem;
+}
+
+.interest-contribution-groups {
+  display: grid;
+  gap: 14px;
+}
+
+.interest-contribution-group {
+  display: grid;
+  gap: 10px;
+}
+
+.interest-contribution-group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.interest-contribution-group-head h3 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 1rem;
+}
+
+.interest-contribution-group-head span {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.interest-contribution-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+}
+
+.interest-contribution-table {
+  width: 100%;
+  min-width: 1400px;
+  border-collapse: collapse;
+}
+
+.interest-contribution-table th,
+.interest-contribution-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-color);
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+  font-size: 0.84rem;
+}
+
+.interest-contribution-table th {
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--card-bg-strong) 94%, transparent);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.interest-contribution-table td {
+  color: var(--text-secondary);
+}
+
+.interest-contribution-table td:nth-last-child(-n + 3) {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.interest-contribution-table .interest-contribution-amount {
+  text-align: right;
+}
+
+.interest-contribution-receipts {
+  display: grid;
+  gap: 3px;
+}
+
+.interest-contribution-receipts span {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+}
+
+.interest-contribution-account-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent-color);
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.interest-contribution-account-link:hover,
+.interest-contribution-account-link:focus-visible {
+  color: var(--accent-strong);
+}
+
+.interest-contribution-table tbody tr:last-child td {
+  border-bottom: 0;
 }
 
 .stat-card,
@@ -3969,6 +4074,10 @@
   }
 
   .stat-card-wide {
+    grid-column: span 2;
+  }
+
+  .stat-card-wider {
     grid-column: span 2;
   }
 

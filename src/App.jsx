@@ -12,7 +12,7 @@ import FyTaxView from './features/tax/FyTaxView.jsx'
 import { downloadInvestmentsWorkbook } from './features/admin/exportWorkbook.js'
 import { DEMO_PORTFOLIO_LABEL } from '../shared/demoPortfolio.js'
 import { generateOwnerWiseFYTaxSummary, parseFinancialYearLabel } from '../shared/fyTaxEngine.js'
-import { APP_ACTIVITY_EVENT, TODAY, addDays, computeTdsAmount, computeTdsPercent, deriveTenureParts, emptyForm, formatAllocationsText, formatCurrency, formatDate, formatTenure, generateInterestEvents, getCashSettlements, getCurrentFinancialYearRange, getDateSortValue, getEffectiveMaturityDate, getEffectivePayoutMode, getFinancialYearLabelFromDate, getFinancialYearRangeFromLabel, getFundingAllocations, getHolderSearchTokens, getMaturitySourceEventId, getPayoutModeLabel, getPostTdsAmount, hydrateDeposit, needsPeriodicPayoutSetup, normalizeDeposit, parseAllocationEntries, requestJson, toYmd } from './features/deposits/depositModel.js'
+import { APP_ACTIVITY_EVENT, TODAY, addDays, computeTdsAmount, computeTdsPercent, deriveTenureParts, emptyForm, formatAllocationsText, formatCurrency, formatDate, formatInterestRate, formatTenure, generateInterestEvents, getCashSettlements, getCurrentFinancialYearRange, getDateSortValue, getEffectiveMaturityDate, getEffectivePayoutMode, getFinancialYearLabelFromDate, getFinancialYearRangeFromLabel, getFundingAllocations, getHolderSearchTokens, getMaturitySourceEventId, getPayoutModeLabel, getPostTdsAmount, hydrateDeposit, needsPeriodicPayoutSetup, normalizeDeposit, parseAllocationEntries, requestJson, toYmd } from './features/deposits/depositModel.js'
 import { buildOwnerAliasLookup, emptyMasterData, normalizeMasterData } from '../shared/masterData.js'
 
 const ADD_NEW_MASTER_VALUE = '__add_new_master__'
@@ -407,6 +407,9 @@ const formatEditableNumber = (value, precision = 4) => {
   return Number(Number(value).toFixed(precision)).toString()
 }
 
+const formatWholeNumber = (value) =>
+  new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(Number(value || 0))
+
 const getSearchDateTokens = (value) => {
   if (!value) {
     return []
@@ -563,6 +566,8 @@ function App() {
   const [maturityFocusMode, setMaturityFocusMode] = useState('all')
   const [showAllMaturityItems, setShowAllMaturityItems] = useState(false)
   const [showAllInterestItems, setShowAllInterestItems] = useState(false)
+  const [isReinvestmentDrilldownOpen, setIsReinvestmentDrilldownOpen] = useState(false)
+  const [showAllReinvestmentItems, setShowAllReinvestmentItems] = useState(false)
   const [isSavingMasters, setIsSavingMasters] = useState(false)
   const [mastersFeedback, setMastersFeedback] = useState(null)
   const [mastersIntent, setMastersIntent] = useState(null)
@@ -1608,6 +1613,68 @@ function App() {
     ? maturityDashboardItems
     : maturityDashboardItems.slice(0, DASHBOARD_PREVIEW_LIMIT)
 
+  const realizedInterestInvestmentGroups = useMemo(() => {
+    const depositsById = new Map(
+      dashboardScopedDeposits.map((deposit) => [deposit.id, deposit]),
+    )
+    const contributionsByDepositId = new Map()
+
+    stats.interestRealizationEvents.forEach((event) => {
+      const deposit = depositsById.get(event.depositId)
+      if (!deposit) {
+        return
+      }
+
+      const grossInterest = Number(event.amount || 0)
+      const tdsAmount = Number(event.tdsAmount || 0)
+      const netInterest = Number(event.netAmount ?? event.amount ?? 0)
+      if (grossInterest <= 0 && tdsAmount <= 0 && netInterest <= 0) {
+        return
+      }
+
+      const current = contributionsByDepositId.get(deposit.id) ?? {
+        deposit,
+        grossInterest: 0,
+        tdsAmount: 0,
+        netInterest: 0,
+        maturityReceiptCount: 0,
+        periodicReceiptCount: 0,
+        receiptEvents: [],
+      }
+
+      current.grossInterest += grossInterest
+      current.tdsAmount += tdsAmount
+      current.netInterest += netInterest
+      if (event.type === 'Maturity interest') {
+        current.maturityReceiptCount += 1
+      } else {
+        current.periodicReceiptCount += 1
+      }
+      current.receiptEvents.push({ type: event.type, date: event.date })
+      contributionsByDepositId.set(deposit.id, current)
+    })
+
+    const groupsByOwner = new Map()
+    contributionsByDepositId.forEach((contribution) => {
+      const ownerName = contribution.deposit.holderName || 'Unassigned owner'
+      const group = groupsByOwner.get(ownerName) ?? { ownerName, investments: [] }
+      group.investments.push(contribution)
+      groupsByOwner.set(ownerName, group)
+    })
+
+    return Array.from(groupsByOwner.values())
+      .map((group) => ({
+        ...group,
+        investments: group.investments.sort(
+          (left, right) =>
+            getDateSortValue(left.deposit.maturityDate) -
+              getDateSortValue(right.deposit.maturityDate) ||
+            String(left.deposit.bankName || '').localeCompare(String(right.deposit.bankName || '')),
+        ),
+      }))
+      .sort((left, right) => left.ownerName.localeCompare(right.ownerName))
+  }, [dashboardScopedDeposits, stats.interestRealizationEvents])
+
   const interestDashboardItems =
     interestFocusMode === 'pending'
       ? stats.dueInterestAwaitingReinvestmentSummary
@@ -1618,6 +1685,27 @@ function App() {
   const visibleInterestDashboardItems = showAllInterestItems
     ? interestDashboardItems
     : interestDashboardItems.slice(0, DASHBOARD_PREVIEW_LIMIT)
+
+  const reinvestmentDashboardItems = useMemo(
+    () =>
+      [
+        ...stats.maturityAwaitingReinvestment.map((event) => ({
+          ...event,
+          reinvestmentType: 'Maturity cash',
+          availableAmount: event.unallocatedAmount,
+        })),
+        ...stats.dueInterestAwaitingReinvestment.map((event) => ({
+          ...event,
+          reinvestmentType: 'Interest cash',
+          availableAmount: event.unallocatedAmount,
+        })),
+      ].sort((left, right) => new Date(left.date) - new Date(right.date)),
+    [stats.dueInterestAwaitingReinvestment, stats.maturityAwaitingReinvestment],
+  )
+
+  const visibleReinvestmentDashboardItems = showAllReinvestmentItems
+    ? reinvestmentDashboardItems
+    : reinvestmentDashboardItems.slice(0, DASHBOARD_PREVIEW_LIMIT)
 
   const selectedReinvestmentSummary = selectedDeposit
     ? (() => {
@@ -3260,19 +3348,18 @@ function App() {
     }, 0)
   }
 
-  const showMaturityDrilldown = () => {
-    setMaturityFocusMode('pending')
-    scrollToDashboardSection('dashboard-maturity-section')
-  }
-
   const showRealizedInterestDrilldown = () => {
+    setIsReinvestmentDrilldownOpen(false)
     setInterestFocusMode('realizing')
     scrollToDashboardSection('dashboard-interest-section')
   }
 
-  const showUnusedInterestDrilldown = () => {
-    setInterestFocusMode('pending')
-    scrollToDashboardSection('dashboard-interest-section')
+  const showReinvestmentDrilldown = () => {
+    setIsReinvestmentDrilldownOpen(true)
+    setShowAllReinvestmentItems(false)
+    setMaturityFocusMode('all')
+    setInterestFocusMode('all')
+    scrollToDashboardSection('dashboard-reinvestment-section')
   }
 
   const handleBulkImportSuccess = async () => {
@@ -3879,7 +3966,7 @@ function App() {
                 <small>{stats.openDeposits} active</small>
               </article>
               <article
-                className="stat-card stat-card-action stat-card-wide fy-interest-card clickable-surface"
+                className="stat-card stat-card-action stat-card-wider fy-interest-card clickable-surface"
                 role="button"
                 tabIndex={0}
                 onClick={showRealizedInterestDrilldown}
@@ -3906,32 +3993,23 @@ function App() {
                 <small>FY {stats.currentFinancialYearLabel} | View receipts</small>
               </article>
               <article
-                className="stat-card stat-card-action clickable-surface"
-                role="button"
-                tabIndex={0}
-                onClick={showMaturityDrilldown}
-                onKeyDown={(event) => handleActionCardKeyDown(event, showMaturityDrilldown)}
-              >
-                <span className="stat-label-row">
-                  <span>Maturity cash available</span>
-                  {renderHelpHint('unused-maturity-cash', 'This is maturity cash already received and available to reinvest.')}
-                </span>
-                <strong>{formatCurrency(stats.uninvestedMaturityCash)}</strong>
-                <small>FY {stats.currentFinancialYearLabel} | View investments</small>
-              </article>
-              <article
                 className="stat-card stat-card-action warning clickable-surface"
                 role="button"
                 tabIndex={0}
-                onClick={showUnusedInterestDrilldown}
-                onKeyDown={(event) => handleActionCardKeyDown(event, showUnusedInterestDrilldown)}
+                onClick={showReinvestmentDrilldown}
+                onKeyDown={(event) => handleActionCardKeyDown(event, showReinvestmentDrilldown)}
               >
                 <span className="stat-label-row">
-                  <span>Interest cash available</span>
-                  {renderHelpHint('interest-not-reused', 'This is interest cash already received and available to reinvest.')}
+                  <span>Cash to reinvest</span>
+                  {renderHelpHint(
+                    'cash-to-reinvest',
+                    'Maturity cash and interest cash already received but not yet fully used in new investments.',
+                  )}
                 </span>
-                <strong>{formatCurrency(stats.uninvestedInterestCash)}</strong>
-                <small>FY {stats.currentFinancialYearLabel} | View investments</small>
+                <strong>{formatCurrency(stats.uninvestedMaturityCash + stats.uninvestedInterestCash)}</strong>
+                <small>
+                  Maturity {formatCurrency(stats.uninvestedMaturityCash)} | Interest {formatCurrency(stats.uninvestedInterestCash)}
+                </small>
               </article>
             </div>
 
@@ -3974,6 +4052,79 @@ function App() {
               }
             />
 
+            {isReinvestmentDrilldownOpen ? (
+              <article id="dashboard-reinvestment-section" className="panel">
+                <div className="section-head">
+                  <div>
+                    <div className="section-title-row">
+                      <h2>Cash to reinvest</h2>
+                      {renderHelpHint(
+                        'cash-to-reinvest-section',
+                        'Maturity cash and interest cash already received but not yet fully used in new investments.',
+                      )}
+                    </div>
+                    <p>Available maturity and interest cash, shown together in date order.</p>
+                  </div>
+                  <div className="section-head-actions">
+                    {reinvestmentDashboardItems.length > DASHBOARD_PREVIEW_LIMIT ? (
+                      <button
+                        type="button"
+                        className="secondary-btn compact ghost-btn dashboard-toggle-btn"
+                        onClick={() => setShowAllReinvestmentItems((current) => !current)}
+                      >
+                        {showAllReinvestmentItems ? 'Show fewer' : 'View all cash'}
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="secondary-btn compact ghost-btn dashboard-toggle-btn"
+                      onClick={() => {
+                        setIsReinvestmentDrilldownOpen(false)
+                        setMaturityFocusMode('all')
+                        setInterestFocusMode('all')
+                      }}
+                    >
+                      Back to timelines
+                    </button>
+                  </div>
+                </div>
+                <div className="list timeline-preview-list">
+                  {visibleReinvestmentDashboardItems.length > 0 ? (
+                    visibleReinvestmentDashboardItems.map((event) => (
+                      <button
+                        key={event.eventId}
+                        type="button"
+                        className="deposit-card clickable-surface"
+                        onClick={() =>
+                          openDepositDrilldown(
+                            event.depositId,
+                            event.accountNumber || event.depositId,
+                          )
+                        }
+                      >
+                        <div className="deposit-topline">
+                          <strong>{event.bankName}</strong>
+                          <span className={event.reinvestmentType === 'Maturity cash' ? 'pill closed' : 'pill open'}>
+                            {event.reinvestmentType}
+                          </span>
+                        </div>
+                        <p>{event.holderName} | {event.accountNumber || 'No account number'}</p>
+                        <p>{event.instrumentType || event.sourceLabel || 'Interest'}</p>
+                        <p>
+                          Received {formatDate(event.date)} | Available to reinvest {formatCurrency(event.availableAmount)}
+                        </p>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="empty-state-card">
+                      <div className="empty-state-icon" aria-hidden="true">○</div>
+                      <p className="lineage-empty">No received maturity or interest cash is available to reinvest.</p>
+                    </div>
+                  )}
+                </div>
+              </article>
+            ) : (
+              <>
             <article id="dashboard-maturity-section" className="panel">
               <div className="section-head">
                 <div>
@@ -4006,13 +4157,10 @@ function App() {
                   ) : null}
                   <button
                     type="button"
-                    className={maturityFocusMode === 'pending' ? 'secondary-btn compact ghost-btn dashboard-toggle-btn' : 'secondary-btn compact dashboard-action-btn dashboard-toggle-btn'}
-                    onClick={() => {
-                      setShowAllMaturityItems(false)
-                      setMaturityFocusMode((current) => (current === 'pending' ? 'all' : 'pending'))
-                    }}
+                    className="secondary-btn compact dashboard-action-btn dashboard-toggle-btn"
+                    onClick={showReinvestmentDrilldown}
                   >
-                    {maturityFocusMode === 'pending' ? 'Back to timeline' : 'View cash to reinvest'}
+                    View cash to reinvest
                   </button>
                 </div>
               </div>
@@ -4085,7 +4233,7 @@ function App() {
                   </p>
                 </div>
                 <div className="section-head-actions">
-                {interestDashboardItems.length > DASHBOARD_PREVIEW_LIMIT ? (
+                {interestFocusMode !== 'realizing' && interestDashboardItems.length > DASHBOARD_PREVIEW_LIMIT ? (
                     <button
                       type="button"
                       className="secondary-btn compact ghost-btn dashboard-toggle-btn"
@@ -4102,14 +4250,126 @@ function App() {
                     type="button"
                     className={interestFocusMode !== 'all' ? 'secondary-btn compact ghost-btn dashboard-toggle-btn' : 'secondary-btn compact dashboard-action-btn dashboard-toggle-btn'}
                     onClick={() => {
-                      setShowAllInterestItems(false)
-                      setInterestFocusMode((current) => (current === 'all' ? 'pending' : 'all'))
+                      if (interestFocusMode !== 'all') {
+                        setShowAllInterestItems(false)
+                        setInterestFocusMode('all')
+                        return
+                      }
+                      showReinvestmentDrilldown()
                     }}
                   >
                     {interestFocusMode !== 'all' ? 'Back to timeline' : 'View cash to reinvest'}
                   </button>
                 </div>
               </div>
+              {interestFocusMode === 'realizing' ? (
+                realizedInterestInvestmentGroups.length > 0 ? (
+                  <div className="interest-contribution-groups">
+                    {realizedInterestInvestmentGroups.map((group) => (
+                      <section key={group.ownerName} className="interest-contribution-group">
+                        <div className="interest-contribution-group-head">
+                          <h3>{group.ownerName}</h3>
+                          <span>
+                            {group.investments.length} contributing investment{group.investments.length === 1 ? '' : 's'}
+                          </span>
+                        </div>
+                        <div className="interest-contribution-table-wrap">
+                          <table className="interest-contribution-table">
+                            <thead>
+                              <tr>
+                                <th>Bank</th>
+                                <th>Account</th>
+                                <th>Instrument</th>
+                                <th>Investment date</th>
+                                <th>Maturity date</th>
+                                <th>Principal</th>
+                                <th>Rate</th>
+                                <th>Status</th>
+                                <th>Receipts</th>
+                                <th>Receipt dates</th>
+                                <th className="interest-contribution-amount">Gross interest</th>
+                                <th className="interest-contribution-amount">TDS</th>
+                                <th className="interest-contribution-amount">Net interest</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {group.investments.map((contribution) => {
+                                const { deposit } = contribution
+                                const receiptSummary = [
+                                  contribution.maturityReceiptCount > 0
+                                    ? `${contribution.maturityReceiptCount} maturity`
+                                    : '',
+                                  contribution.periodicReceiptCount > 0
+                                    ? `${contribution.periodicReceiptCount} periodic`
+                                    : '',
+                                ]
+                                  .filter(Boolean)
+                                  .join(' + ')
+                                const receiptDates = [...contribution.receiptEvents]
+                                  .sort((left, right) => getDateSortValue(left.date) - getDateSortValue(right.date))
+                                  .map((receipt) => formatDate(receipt.date))
+
+                                return (
+                                  <tr key={deposit.id}>
+                                    <td>{deposit.bankName || '—'}</td>
+                                    <td>
+                                      {deposit.accountNumber ? (
+                                        <button
+                                          type="button"
+                                          className="interest-contribution-account-link"
+                                          onClick={() =>
+                                            openDepositDrilldown(
+                                              deposit.id,
+                                              deposit.accountNumber || deposit.id,
+                                            )
+                                          }
+                                        >
+                                          {deposit.accountNumber}
+                                        </button>
+                                      ) : (
+                                        '—'
+                                      )}
+                                    </td>
+                                    <td>
+                                      {String(deposit.instrumentType || '').trim().toLowerCase() === 'term deposit'
+                                        ? 'FD'
+                                        : deposit.instrumentType || '—'}
+                                    </td>
+                                    <td>{formatDate(deposit.investmentDate)}</td>
+                                    <td>{formatDate(deposit.maturityDate)}</td>
+                                    <td>{formatCurrency(deposit.principalAmount)}</td>
+                                    <td>{formatInterestRate(deposit.interestRate)}</td>
+                                    <td>{deposit.status || '—'}</td>
+                                    <td>{receiptSummary || '—'}</td>
+                                    <td>
+                                      <div className="interest-contribution-receipts">
+                                        {receiptDates.map((receiptDate, index) => (
+                                          <span key={`${receiptDate}-${index}`}>{receiptDate}</span>
+                                        ))}
+                                      </div>
+                                    </td>
+                                    <td className="interest-contribution-amount">
+                                      {formatWholeNumber(contribution.grossInterest)}
+                                    </td>
+                                    <td className="interest-contribution-amount">
+                                      {formatWholeNumber(contribution.tdsAmount)}
+                                    </td>
+                                    <td className="interest-contribution-amount">
+                                      {formatWholeNumber(contribution.netInterest)}
+                                    </td>
+                                  </tr>
+                                )
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </section>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="lineage-empty">No gross interest receipts are scheduled in this financial year.</p>
+                )
+              ) : (
               <div className="list timeline-preview-list">
                 {interestDashboardItems.length > 0 ? (
                   visibleInterestDashboardItems.map((event) => (
@@ -4150,9 +4410,7 @@ function App() {
                     </button>
                   ))
                 ) : (
-                  interestFocusMode === 'realizing' ? (
-                    <p className="lineage-empty">No gross interest receipts are scheduled in this financial year.</p>
-                  ) : interestFocusMode === 'pending' ? (
+                  interestFocusMode === 'pending' ? (
                     <div className="empty-state-card">
                       <div className="empty-state-icon" aria-hidden="true">○</div>
                       <p className="lineage-empty">No received interest cash is available to reinvest.</p>
@@ -4163,11 +4421,14 @@ function App() {
                 )}
                 {!showAllInterestItems && interestDashboardItems.length > visibleInterestDashboardItems.length ? (
                   <p className="timeline-preview-more">
-                    {interestFocusMode === 'realizing' ? 'View all receipts' : `View ${interestDashboardItems.length - visibleInterestDashboardItems.length} more payout${interestDashboardItems.length - visibleInterestDashboardItems.length === 1 ? '' : 's'}`}
+                    {`View ${interestDashboardItems.length - visibleInterestDashboardItems.length} more payout${interestDashboardItems.length - visibleInterestDashboardItems.length === 1 ? '' : 's'}`}
                   </p>
                 ) : null}
               </div>
+              )}
             </article>
+              </>
+            )}
           </div>
 
           <aside className="stack">
