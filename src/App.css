@@ -1229,6 +1229,50 @@
   grid-column: span 3;
 }
 
+.owner-investment-breakdown-list {
+  display: grid;
+  gap: 0;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.owner-investment-breakdown-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.owner-investment-breakdown-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.owner-investment-breakdown-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.owner-investment-breakdown-copy strong {
+  overflow-wrap: anywhere;
+}
+
+.owner-investment-breakdown-copy span {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.owner-investment-breakdown-value {
+  color: var(--text-primary);
+  font-size: 0.94rem;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
 .tax-panel {
   display: grid;
   gap: 15px;

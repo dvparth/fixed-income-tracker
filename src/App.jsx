@@ -1587,6 +1587,31 @@ function App() {
     }
   }, [activeDeposits, allocationMap, dashboardScopedCashFlowEvents, dashboardScopedDeposits, selectedFinancialYearRange.end, selectedFinancialYearRange.label, selectedFinancialYearRange.start, settlementMap])
 
+  const ownerInvestmentIssuerBreakdown = useMemo(() => {
+    const groupedInvestments = dashboardScopedDeposits.reduce((groups, deposit) => {
+      if (deposit.status !== 'Open') {
+        return groups
+      }
+
+      const issuerName = String(deposit.bankName || '').trim() || 'Unknown issuer'
+      const issuer = groups.get(issuerName) ?? {
+        issuerName,
+        investmentCount: 0,
+        principalAmount: 0,
+      }
+
+      issuer.investmentCount += 1
+      issuer.principalAmount += Number(deposit.principalAmount || 0)
+      groups.set(issuerName, issuer)
+      return groups
+    }, new Map())
+
+    return Array.from(groupedInvestments.values()).sort(
+      (left, right) =>
+        right.principalAmount - left.principalAmount || left.issuerName.localeCompare(right.issuerName),
+    )
+  }, [dashboardScopedDeposits])
+
   const ownerDashboardCards = useMemo(() => {
     return stats.ownerSummary.map((owner) => ({
       ...owner,
@@ -4048,6 +4073,42 @@ function App() {
                 </small>
               </article>
             </div>
+
+            <article className="panel owner-investment-breakdown">
+              <div className="section-head">
+                <div>
+                  <h2>Investment value by bank / issuer</h2>
+                  <p>
+                    {selectedDashboardOwner
+                      ? `Active principal for ${selectedDashboardOwner}.`
+                      : 'Active principal across all owners.'}
+                  </p>
+                </div>
+              </div>
+              {ownerInvestmentIssuerBreakdown.length > 0 ? (
+                <ul className="owner-investment-breakdown-list">
+                  {ownerInvestmentIssuerBreakdown.map((issuer) => (
+                    <li className="owner-investment-breakdown-row" key={issuer.issuerName}>
+                      <div className="owner-investment-breakdown-copy">
+                        <strong>{issuer.issuerName}</strong>
+                        <span>
+                          {issuer.investmentCount} active investment{issuer.investmentCount === 1 ? '' : 's'}
+                        </span>
+                      </div>
+                      <strong className="owner-investment-breakdown-value">
+                        {formatCurrency(issuer.principalAmount)}
+                      </strong>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="lineage-empty">
+                  {selectedDashboardOwner
+                    ? `No active investments to show for ${selectedDashboardOwner}.`
+                    : 'No active investments to show.'}
+                </p>
+              )}
+            </article>
 
             {!isTaxViewOpen ? (
             <article className="panel tax-inline-summary-card">
