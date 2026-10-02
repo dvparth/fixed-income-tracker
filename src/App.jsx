@@ -12,7 +12,7 @@ import FyTaxView from './features/tax/FyTaxView.jsx'
 import { downloadInvestmentsWorkbook } from './features/admin/exportWorkbook.js'
 import { DEMO_PORTFOLIO_LABEL } from '../shared/demoPortfolio.js'
 import { generateOwnerWiseFYTaxSummary, parseFinancialYearLabel } from '../shared/fyTaxEngine.js'
-import { APP_ACTIVITY_EVENT, TODAY, addDays, computeTdsAmount, computeTdsPercent, deriveTenureParts, emptyForm, formatAllocationsText, formatCurrency, formatDate, formatInterestRate, formatTenure, generateInterestEvents, getCashSettlements, getCurrentFinancialYearRange, getDateSortValue, getEffectiveMaturityDate, getEffectivePayoutMode, getFinancialYearLabelFromDate, getFinancialYearRangeFromLabel, getFundingAllocations, getHolderSearchTokens, getMaturitySourceEventId, getPayoutModeLabel, getPostTdsAmount, hydrateDeposit, needsPeriodicPayoutSetup, normalizeDeposit, parseAllocationEntries, requestJson, toYmd } from './features/deposits/depositModel.js'
+import { APP_ACTIVITY_EVENT, TODAY, addDays, computeTdsAmount, computeTdsPercent, deriveTenureParts, emptyForm, formatAllocationsText, formatCurrency, formatDate, formatInterestRate, formatTenure, generateInterestEvents, getCashSettlements, getCurrentFinancialYearRange, getDateSortValue, getEditableNetPayoutValue, getEffectiveMaturityDate, getEffectivePayoutMode, getFinancialYearLabelFromDate, getFinancialYearRangeFromLabel, getFundingAllocations, getHolderSearchTokens, getMaturitySourceEventId, getPayoutModeLabel, getPostTdsAmount, hydrateDeposit, needsPeriodicPayoutSetup, normalizeDeposit, parseAllocationEntries, requestJson, toYmd } from './features/deposits/depositModel.js'
 import { buildOwnerAliasLookup, emptyMasterData, normalizeMasterData } from '../shared/masterData.js'
 
 const ADD_NEW_MASTER_VALUE = '__add_new_master__'
@@ -1771,7 +1771,9 @@ function App() {
     payoutMode: getEffectivePayoutMode(deposit) ?? 'on-maturity',
     yearlyPayoutMonthDay: deposit.yearlyPayoutMonthDay ?? '',
     interestPayoutBeforeTds: deposit.interestPayoutBeforeTds ?? '',
-    interestPayoutAfterTds: deposit.interestPayoutAfterTds ?? '',
+    interestPayoutAfterTds: getEditableNetPayoutValue(deposit),
+    interestPayoutSchedule: deposit.interestPayoutSchedule ?? '',
+    interestPayoutOverrides: deposit.interestPayoutOverrides ?? [],
     accountNumber: deposit.accountNumber ?? '',
     tenureYears: deposit.tenureYears ?? '',
     tenureMonths: deposit.tenureMonths ?? '',
@@ -2253,6 +2255,13 @@ function App() {
 
     setFormValues((current) => {
       nextFormValues = { ...current, [name]: value }
+      if (name === 'interestPayoutBeforeTds' && String(current.interestPayoutAfterTds ?? '').trim() === '') {
+        const grossPayout = Number(value)
+        const tdsPercent = Number(current.tdsPercent) > 0 ? Number(current.tdsPercent) : 10
+        if (Number.isFinite(grossPayout) && grossPayout >= 0) {
+          nextFormValues.interestPayoutAfterTds = Number((grossPayout * (1 - tdsPercent / 100)).toFixed(2))
+        }
+      }
       if (name === 'instrumentType') {
         nextFormValues.accountNumber = deriveAccountOrCertificateNumber(
           current.bankName,
@@ -2347,6 +2356,23 @@ function App() {
     }
 
     handleFormChange(event)
+  }
+
+  const handleInterestPayoutOverrideChange = (key, field, value) => {
+    setFormValues((current) => {
+      const currentOverrides = Array.isArray(current.interestPayoutOverrides)
+        ? current.interestPayoutOverrides
+        : []
+      const existing = currentOverrides.find((override) => override?.key === key) || { key }
+      const nextOverride = { ...existing, [field]: value === '' ? '' : Number(value) }
+      return {
+        ...current,
+        interestPayoutOverrides: [
+          ...currentOverrides.filter((override) => override?.key !== key),
+          nextOverride,
+        ],
+      }
+    })
   }
 
   const handleActualAccountNumberChange = (event) => {
@@ -2928,6 +2954,16 @@ function App() {
   const effectiveEditorPayoutMode = formValues.payoutMode
 
   const isPeriodicEditor = effectiveEditorPayoutMode !== 'on-maturity'
+  const proratedInterestPreview = useMemo(
+    () =>
+      effectiveEditorPayoutMode === 'quarterly-fy' &&
+      formValues.interestPayoutSchedule === 'prorated-boundaries-v1'
+        ? generateInterestEvents({ ...formValues, id: 'preview' }).filter(
+            (event) => event.isFirstPeriod || event.isFinalPeriod,
+          )
+        : [],
+    [effectiveEditorPayoutMode, formValues],
+  )
   const fundingEntries = parseAllocationEntries(formValues.allocationsText)
   const linkedFundingAmount = fundingEntries.reduce((sum, entry) => sum + Number(entry.amount || 0), 0)
   const principalAmountValue = Number(formValues.principalAmount || 0)
@@ -4640,6 +4676,8 @@ function App() {
           handleMasterBoundFieldChange={handleMasterBoundFieldChange}
           effectiveEditorPayoutMode={effectiveEditorPayoutMode}
           isPeriodicEditor={isPeriodicEditor}
+          proratedInterestPreview={proratedInterestPreview}
+          handleInterestPayoutOverrideChange={handleInterestPayoutOverrideChange}
           linkedFundingAmount={linkedFundingAmount}
           fundingDifference={fundingDifference}
           selectedFundingEventId={selectedFundingEventId}

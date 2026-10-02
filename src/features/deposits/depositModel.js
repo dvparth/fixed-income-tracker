@@ -6,6 +6,7 @@ export const FY_QUARTER_MONTH_DAYS = [
   [8, 30],
   [11, 31],
 ]
+export const PRORATED_PAYOUT_SCHEDULE = 'prorated-boundaries-v1'
 
 export const emptyForm = {
   srNo: '',
@@ -19,6 +20,8 @@ export const emptyForm = {
   yearlyPayoutMonthDay: '',
   interestPayoutBeforeTds: '',
   interestPayoutAfterTds: '',
+  interestPayoutSchedule: PRORATED_PAYOUT_SCHEDULE,
+  interestPayoutOverrides: [],
   accountNumber: '',
   tenureYears: '0',
   tenureMonths: '0',
@@ -326,6 +329,8 @@ export const hydrateDeposit = (deposit) => {
       closureDate: '',
       interestPayoutBeforeTds: '',
       interestPayoutAfterTds: '',
+      interestPayoutSchedule: '',
+      interestPayoutOverrides: [],
       tenureYears: tenure.years,
       tenureMonths: tenure.months,
       tenureDays: tenure.days,
@@ -342,6 +347,10 @@ export const hydrateDeposit = (deposit) => {
       closureDate: deposit.closureDate || '',
       interestPayoutBeforeTds: deposit.interestPayoutBeforeTds ?? '',
       interestPayoutAfterTds: deposit.interestPayoutAfterTds ?? '',
+      interestPayoutSchedule: deposit.interestPayoutSchedule || '',
+      interestPayoutOverrides: Array.isArray(deposit.interestPayoutOverrides)
+        ? deposit.interestPayoutOverrides
+        : [],
       tenureYears: tenure.years,
       tenureMonths: tenure.months,
       tenureDays: tenure.days,
@@ -386,9 +395,49 @@ export const needsPeriodicPayoutSetup = (deposit) =>
     deposit.interestPayoutAfterTds === null ||
     deposit.interestPayoutAfterTds === undefined)
 
-export const createInterestEvent = (deposit, date) => {
+const roundCurrency = (value) => Number(Number(value || 0).toFixed(2))
+
+export const getEditableNetPayoutValue = (deposit = {}) => {
+  const storedValue = deposit.interestPayoutAfterTds
+  if (storedValue !== '' && storedValue !== null && storedValue !== undefined) {
+    return storedValue
+  }
+
   const grossAmount = Number(deposit.interestPayoutBeforeTds || 0)
-  const netAmount = Number(deposit.interestPayoutAfterTds || 0)
+  if (!Number.isFinite(grossAmount) || grossAmount <= 0) {
+    return ''
+  }
+
+  const tdsPercent = Number(deposit.tdsPercent) > 0 ? Number(deposit.tdsPercent) : 10
+  return roundCurrency(grossAmount * (1 - tdsPercent / 100))
+}
+
+const getPayoutOverride = (deposit, key) =>
+  (deposit.interestPayoutOverrides || []).find((override) => override?.key === key) || null
+
+const calculateProratedPayout = (deposit, accrualStart, accrualEnd) => {
+  const start = new Date(`${accrualStart}T00:00:00`)
+  const end = new Date(`${accrualEnd}T00:00:00`)
+  const days = Math.max(Math.round((end.getTime() - start.getTime()) / 86400000), 0)
+  const principal = Number(deposit.principalAmount || 0)
+  const annualRate = Number(deposit.interestRate || 0) / 100
+  const grossAmount = roundCurrency((principal * annualRate * days) / 365)
+  const standardGross = Number(deposit.interestPayoutBeforeTds || 0)
+  const standardNet = Number(getEditableNetPayoutValue(deposit) || 0)
+  const fallbackTdsPercent = Number(deposit.tdsPercent) > 0 ? Number(deposit.tdsPercent) : 10
+  const netRatio =
+    standardGross > 0 && standardNet > 0
+      ? standardNet / standardGross
+      : 1 - fallbackTdsPercent / 100
+
+  return { days, grossAmount, netAmount: roundCurrency(grossAmount * Math.max(netRatio, 0)) }
+}
+
+export const createInterestEvent = (deposit, date, details = {}) => {
+  const override = details.overrideKey ? getPayoutOverride(deposit, details.overrideKey) : null
+  const calculated = details.accrualStart ? calculateProratedPayout(deposit, details.accrualStart, date) : null
+  const grossAmount = Number(override?.grossAmount ?? calculated?.grossAmount ?? deposit.interestPayoutBeforeTds ?? 0)
+  const netAmount = Number(override?.netAmount ?? calculated?.netAmount ?? deposit.interestPayoutAfterTds ?? 0)
 
   return {
     eventId: `interest:${deposit.id}:${date}`,
@@ -402,6 +451,13 @@ export const createInterestEvent = (deposit, date) => {
     accountNumber: deposit.accountNumber,
     sourceLabel: `${deposit.instrumentType} interest`,
     title: `${deposit.bankName} interest credit`,
+    accrualStart: details.accrualStart || '',
+    isProrated: Boolean(details.isProrated),
+    isFirstPeriod: Boolean(details.isFirstPeriod),
+    isFinalPeriod: Boolean(details.isFinalPeriod),
+    calculatedGrossAmount: calculated?.grossAmount ?? null,
+    calculatedNetAmount: calculated?.netAmount ?? null,
+    isOverridden: Boolean(override),
   }
 }
 
@@ -413,7 +469,8 @@ export const generateInterestEvents = (deposit) => {
     payoutMode === 'on-maturity' ||
     !deposit.investmentDate ||
     !eventEndDate ||
-    deposit.interestPayoutAfterTds === ''
+    (deposit.interestPayoutAfterTds === '' &&
+      deposit.interestPayoutSchedule !== PRORATED_PAYOUT_SCHEDULE)
   ) {
     return []
   }
@@ -421,6 +478,46 @@ export const generateInterestEvents = (deposit) => {
   const investmentDate = new Date(`${deposit.investmentDate}T00:00:00`)
   const maturityDate = new Date(`${eventEndDate}T00:00:00`)
   const events = []
+
+  if (payoutMode === 'quarterly-fy' && deposit.interestPayoutSchedule === PRORATED_PAYOUT_SCHEDULE) {
+    const quarterEnds = []
+    for (let year = investmentDate.getFullYear(); year <= maturityDate.getFullYear(); year += 1) {
+      FY_QUARTER_MONTH_DAYS.forEach(([monthIndex, day]) => {
+        const candidate = new Date(year, monthIndex, day)
+        if (candidate > investmentDate && candidate < maturityDate) {
+          quarterEnds.push(toYmd(candidate))
+        }
+      })
+    }
+
+    const sortedQuarterEnds = quarterEnds.sort((left, right) => new Date(left) - new Date(right))
+    sortedQuarterEnds.forEach((date, index) => {
+      const isFirstPeriod = index === 0
+      events.push(
+        createInterestEvent(deposit, date, {
+          accrualStart: isFirstPeriod ? deposit.investmentDate : '',
+          isProrated: isFirstPeriod,
+          isFirstPeriod,
+          overrideKey: isFirstPeriod ? 'first' : '',
+        }),
+      )
+    })
+
+    const lastQuarterEnd = sortedQuarterEnds.at(-1) || deposit.investmentDate
+    const maturityYmd = toYmd(maturityDate)
+    if (maturityYmd !== lastQuarterEnd) {
+      events.push(
+        createInterestEvent(deposit, maturityYmd, {
+          accrualStart: lastQuarterEnd,
+          isProrated: true,
+          isFinalPeriod: true,
+          overrideKey: 'final',
+        }),
+      )
+    }
+
+    return events.sort((left, right) => new Date(left.date) - new Date(right.date))
+  }
 
   if (payoutMode === 'quarterly-fy') {
     for (let year = investmentDate.getFullYear(); year <= maturityDate.getFullYear(); year += 1) {
@@ -480,6 +577,10 @@ export const normalizeDeposit = (formValues, existingId, fallbackSrNo, existingD
     yearlyPayoutMonthDay: formValues.yearlyPayoutMonthDay.trim(),
     interestPayoutBeforeTds: parseNumber(formValues.interestPayoutBeforeTds),
     interestPayoutAfterTds: parseNumber(formValues.interestPayoutAfterTds),
+    interestPayoutSchedule: formValues.interestPayoutSchedule || '',
+    interestPayoutOverrides: Array.isArray(formValues.interestPayoutOverrides)
+      ? formValues.interestPayoutOverrides
+      : [],
     accountNumber: formValues.accountNumber.trim(),
     tenureYears: tenure.years,
     tenureMonths: tenure.months,

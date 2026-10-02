@@ -735,6 +735,13 @@
   margin-top: 2px;
 }
 
+.prorated-interest-toggle {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  margin-top: 14px;
+}
+
 .backup-confirm-actions {
   display: flex;
   justify-content: flex-start;

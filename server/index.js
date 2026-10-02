@@ -279,6 +279,11 @@ const cashSettlementSchema = z.object({
   amount: z.number().positive(),
   settledAt: optionalTextField,
 }).strict()
+const interestPayoutOverrideSchema = z.object({
+  key: z.enum(['first', 'final']),
+  grossAmount: numericFormField.optional(),
+  netAmount: numericFormField.optional(),
+}).strict()
 const depositWriteBodySchema = z.object({
   id: z.string().trim().min(1).max(240).optional(),
   srNo: numericFormField,
@@ -292,6 +297,8 @@ const depositWriteBodySchema = z.object({
   yearlyPayoutMonthDay: optionalTextField,
   interestPayoutBeforeTds: numericFormField,
   interestPayoutAfterTds: numericFormField,
+  interestPayoutSchedule: optionalTextField,
+  interestPayoutOverrides: z.array(interestPayoutOverrideSchema).optional(),
   accountNumber: optionalTextField,
   tenureYears: numericFormField,
   tenureMonths: numericFormField,

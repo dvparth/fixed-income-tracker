@@ -51,6 +51,8 @@ export default function DepositEditorView({
   handleMasterBoundFieldChange,
   effectiveEditorPayoutMode,
   isPeriodicEditor,
+  proratedInterestPreview,
+  handleInterestPayoutOverrideChange,
   linkedFundingAmount,
   fundingDifference,
   selectedFundingEventId,
@@ -129,6 +131,9 @@ export default function DepositEditorView({
   }, [fundingSourceOptions, fundingSourceSearch, selectedFundingEventId])
 
   const behaviorMode = getBehaviorMode(effectiveEditorPayoutMode)
+  const usesProratedQuarterlySchedule =
+    effectiveEditorPayoutMode === 'quarterly-fy' &&
+    formValues.interestPayoutSchedule === 'prorated-boundaries-v1'
   const suggestedFundingSources = useMemo(
     () => buildSuggestedFundingSources(fundingSourceOptions),
     [fundingSourceOptions],
@@ -448,7 +453,7 @@ export default function DepositEditorView({
                     </small>
                   </label>
                   <label className="field">
-                    <span>Interest received after TDS</span>
+                    <span>Net payout after TDS</span>
                     <input
                       name="interestPayoutAfterTds"
                       type="number"
@@ -458,7 +463,7 @@ export default function DepositEditorView({
                       autoComplete="off"
                     />
                     <small className="field-help">
-                      Net cash that actually lands in the account each payout.
+                      Auto-calculated from gross interest using the default 10% TDS. You can replace it with the actual bank credit.
                     </small>
                     {formErrors.interestPayoutAfterTds && (
                       <small className="field-error">{formErrors.interestPayoutAfterTds}</small>
@@ -467,6 +472,72 @@ export default function DepositEditorView({
                 </>
               )}
             </div>
+            {effectiveEditorPayoutMode === 'quarterly-fy' && (
+              <div className="prorated-interest-toggle">
+                <button
+                  type="button"
+                  className="secondary-btn compact"
+                  aria-pressed={formValues.interestPayoutSchedule === 'prorated-boundaries-v1'}
+                  onClick={() =>
+                    triggerFormChange(
+                      'interestPayoutSchedule',
+                      formValues.interestPayoutSchedule === 'prorated-boundaries-v1'
+                        ? ''
+                        : 'prorated-boundaries-v1',
+                    )
+                  }
+                >
+                  {formValues.interestPayoutSchedule === 'prorated-boundaries-v1'
+                    ? 'Prorated first and final interest: On'
+                    : 'Use prorated first and final interest'}
+                </button>
+                <small className="field-help">
+                  Keeps maturity as principal only and adds separate first/final interest events.
+                </small>
+              </div>
+            )}
+            {proratedInterestPreview.length > 0 && (
+              <div className="editor-grid">
+                {proratedInterestPreview.map((event) => (
+                  <div className="field" key={event.eventId}>
+                    <span>{event.isFirstPeriod ? 'First prorated interest' : 'Final prorated interest'}</span>
+                    <small className="field-help">
+                      Due {formatDate(event.date)} • {event.calculatedGrossAmount !== null ? `${Math.round(event.calculatedGrossAmount * 100) / 100} suggested before TDS` : 'Enter principal, rate, and dates for a suggestion.'}
+                    </small>
+                    <div className="editor-grid">
+                      <label className="field">
+                        <span>Before TDS</span>
+                        <input
+                          type="number"
+                          value={event.grossAmount}
+                          onChange={(changeEvent) =>
+                            handleInterestPayoutOverrideChange(
+                              event.isFirstPeriod ? 'first' : 'final',
+                              'grossAmount',
+                              changeEvent.target.value,
+                            )
+                          }
+                        />
+                      </label>
+                      <label className="field">
+                        <span>After TDS</span>
+                        <input
+                          type="number"
+                          value={event.amount}
+                          onChange={(changeEvent) =>
+                            handleInterestPayoutOverrideChange(
+                              event.isFirstPeriod ? 'first' : 'final',
+                              'netAmount',
+                              changeEvent.target.value,
+                            )
+                          }
+                        />
+                      </label>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
 
           <section className="editor-section">
@@ -530,7 +601,7 @@ export default function DepositEditorView({
 
             <div className="editor-grid">
               <label className="field">
-                <span>Maturity before TDS</span>
+                <span>{usesProratedQuarterlySchedule ? 'Principal at maturity' : 'Maturity before TDS'}</span>
                 <input
                   name="maturityBeforeTax"
                   type="number"
@@ -539,11 +610,13 @@ export default function DepositEditorView({
                   autoComplete="off"
                 />
                 <small className="field-help">
-                  Gross maturity amount before tax deduction.
+                  {usesProratedQuarterlySchedule
+                    ? 'Enter the principal returned at maturity. Final interest is recorded separately above.'
+                    : 'Gross maturity amount before tax deduction.'}
                 </small>
               </label>
               <label className="field">
-                <span>Maturity received after TDS</span>
+                <span>{usesProratedQuarterlySchedule ? 'Principal received at maturity' : 'Maturity received after TDS'}</span>
                 <input
                   name="maturityAfterTax"
                   type="number"
@@ -552,7 +625,9 @@ export default function DepositEditorView({
                   autoComplete="off"
                 />
                 <small className="field-help">
-                  Net amount actually received. The difference from gross is treated as TDS.
+                  {usesProratedQuarterlySchedule
+                    ? 'Enter the principal actually received. Do not include the final interest payout.'
+                    : 'Net amount actually received. The difference from gross is treated as TDS.'}
                 </small>
                 {formErrors.maturityAfterTax && (
                   <small className="field-error">{formErrors.maturityAfterTax}</small>
