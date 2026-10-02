@@ -10,6 +10,7 @@ import BackupRestorePanel from './features/settings/BackupRestorePanel.jsx'
 import PortfolioAccessPanel from './features/sharing/PortfolioAccessPanel.jsx'
 import FyTaxView from './features/tax/FyTaxView.jsx'
 import { downloadInvestmentsWorkbook } from './features/admin/exportWorkbook.js'
+import { summarizeActiveInvestmentsByIssuer } from './features/dashboard/dashboardModel.js'
 import { DEMO_PORTFOLIO_LABEL } from '../shared/demoPortfolio.js'
 import { generateOwnerWiseFYTaxSummary, parseFinancialYearLabel } from '../shared/fyTaxEngine.js'
 import { APP_ACTIVITY_EVENT, TODAY, addDays, computeTdsAmount, computeTdsPercent, deriveTenureParts, emptyForm, formatAllocationsText, formatCurrency, formatDate, formatInterestRate, formatTenure, generateInterestEvents, getCashSettlements, getCurrentFinancialYearRange, getDateSortValue, getEditableNetPayoutValue, getEffectiveMaturityDate, getEffectivePayoutMode, getFinancialYearLabelFromDate, getFinancialYearRangeFromLabel, getFundingAllocations, getHolderSearchTokens, getMaturitySourceEventId, getPayoutModeLabel, getPostTdsAmount, hydrateDeposit, needsPeriodicPayoutSetup, normalizeDeposit, parseAllocationEntries, requestJson, toYmd } from './features/deposits/depositModel.js'
@@ -1587,30 +1588,10 @@ function App() {
     }
   }, [activeDeposits, allocationMap, dashboardScopedCashFlowEvents, dashboardScopedDeposits, selectedFinancialYearRange.end, selectedFinancialYearRange.label, selectedFinancialYearRange.start, settlementMap])
 
-  const ownerInvestmentIssuerBreakdown = useMemo(() => {
-    const groupedInvestments = dashboardScopedDeposits.reduce((groups, deposit) => {
-      if (deposit.status !== 'Open') {
-        return groups
-      }
-
-      const issuerName = String(deposit.bankName || '').trim() || 'Unknown issuer'
-      const issuer = groups.get(issuerName) ?? {
-        issuerName,
-        investmentCount: 0,
-        principalAmount: 0,
-      }
-
-      issuer.investmentCount += 1
-      issuer.principalAmount += Number(deposit.principalAmount || 0)
-      groups.set(issuerName, issuer)
-      return groups
-    }, new Map())
-
-    return Array.from(groupedInvestments.values()).sort(
-      (left, right) =>
-        right.principalAmount - left.principalAmount || left.issuerName.localeCompare(right.issuerName),
-    )
-  }, [dashboardScopedDeposits])
+  const ownerInvestmentIssuerBreakdown = useMemo(
+    () => summarizeActiveInvestmentsByIssuer(dashboardScopedDeposits),
+    [dashboardScopedDeposits],
+  )
 
   const ownerDashboardCards = useMemo(() => {
     return stats.ownerSummary.map((owner) => ({
