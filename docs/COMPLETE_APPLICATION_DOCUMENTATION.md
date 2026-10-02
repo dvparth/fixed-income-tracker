@@ -209,6 +209,8 @@ Responsibilities:
 - API calls and owner-scoped paths,
 - wiring child feature modules.
 
+The dashboard Owners panel groups non-deleted investments by holder and shows each holder's open-investment count and total principal. Selecting an owner filters dashboard metrics and cash-flow views for that holder; the owner cards remain visible for all holders. The bank/issuer breakdown is always shown and totals principal from open investments in the current dashboard scope, grouped by bank or issuer. With no owner selected, it summarizes the whole active portfolio.
+
 This file is currently the largest frontend coordination point and should be split opportunistically as stable boundaries appear.
 
 ### 6.2 Deposits
