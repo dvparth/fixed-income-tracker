@@ -7,6 +7,7 @@ export const BACKUP_SHEETS = {
   branches: 'Branches',
   instrumentTypes: 'InstrumentTypes',
   deposits: 'Deposits',
+  salarySavings: 'Salary Savings',
 }
 
 export const BACKUP_DEPOSIT_JSON_COLUMN = 'Record Data'

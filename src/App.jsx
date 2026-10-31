@@ -9,6 +9,8 @@ import MastersView from './features/masters/MastersView.jsx'
 import BackupRestorePanel from './features/settings/BackupRestorePanel.jsx'
 import PortfolioAccessPanel from './features/sharing/PortfolioAccessPanel.jsx'
 import FyTaxView from './features/tax/FyTaxView.jsx'
+import SalarySavingsView from './features/salary/SalarySavingsView.jsx'
+import { summarizeInvestmentSalaryFunding } from './features/salary/salarySavingsModel.js'
 import { downloadInvestmentsWorkbook } from './features/admin/exportWorkbook.js'
 import { summarizeActiveInvestmentsByIssuer } from './features/dashboard/dashboardModel.js'
 import { DEMO_PORTFOLIO_LABEL } from '../shared/demoPortfolio.js'
@@ -525,6 +527,7 @@ function App() {
   const [shareFeedback, setShareFeedback] = useState(null)
   const [isDownloadingWorkbook, setIsDownloadingWorkbook] = useState(false)
   const [deposits, setDeposits] = useState([])
+  const [salarySavings, setSalarySavings] = useState([])
   const [masterData, setMasterData] = useState(emptyMasterData)
   const [activeTab, setActiveTab] = useState('dashboard')
   const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 780)
@@ -647,6 +650,7 @@ function App() {
       setSessionState(createEmptySessionState())
       setActivePortfolioOwnerId('')
       setDeposits([])
+      setSalarySavings([])
       setMasterData(emptyMasterData)
       setSelectedId(null)
       setSharesState({ ownerShares: [], sharedWithMe: [] })
@@ -694,6 +698,7 @@ function App() {
     })
     setActivePortfolioOwnerId(demoResponse.portfolio?.ownerUserId || 'demo-owner-yieldflow')
     setDeposits(nextDeposits)
+    setSalarySavings([])
     setMasterData(nextMasterData)
     setSelectedId((current) =>
       current && nextDeposits.some((deposit) => deposit.id === current)
@@ -722,6 +727,7 @@ function App() {
           setSessionState(createEmptySessionState())
           setActivePortfolioOwnerId('')
           setDeposits([])
+          setSalarySavings([])
           setMasterData(emptyMasterData)
           setSelectedId(null)
           setIsSessionWarningOpen(false)
@@ -836,11 +842,12 @@ function App() {
       try {
         setIsLoading(true)
         setLoadError('')
-        const [depositsData, masterDataResponse] = await Promise.all([
+        const [depositsData, masterDataResponse, salarySavingsResponse] = await Promise.all([
           requestJson(buildOwnerScopedPath('/api/deposits', activePortfolioOwnerId)),
           requestJson(buildOwnerScopedPath('/api/master-data', activePortfolioOwnerId)).catch(
             () => emptyMasterData,
           ),
+          requestJson(buildOwnerScopedPath('/api/salary-savings', activePortfolioOwnerId)).catch(() => []),
         ])
 
         if (!isMounted) {
@@ -853,6 +860,7 @@ function App() {
           nextMasterData,
         )
         setDeposits(nextDeposits)
+        setSalarySavings(salarySavingsResponse || [])
         setMasterData(nextMasterData)
         setSelectedId((current) =>
           current && nextDeposits.some((deposit) => deposit.id === current)
@@ -865,6 +873,7 @@ function App() {
         }
 
         setDeposits([])
+        setSalarySavings([])
         setMasterData(emptyMasterData)
         setSelectedId(null)
         setLoadError(error.message)
@@ -2975,6 +2984,10 @@ function App() {
   const principalAmountValue = Number(formValues.principalAmount || 0)
   const fundingDifference =
     formValues.principalAmount === '' ? null : principalAmountValue - linkedFundingAmount
+  const salaryFundingSummary = useMemo(
+    () => summarizeInvestmentSalaryFunding(salarySavings, editingId, principalAmountValue),
+    [editingId, principalAmountValue, salarySavings],
+  )
   const sourcePreviewEvents = fundingEntries
     .map((entry) => cashFlowMap.get(entry.eventId))
     .filter(Boolean)
@@ -3415,11 +3428,13 @@ function App() {
   const desktopTabs = [
     ['dashboard', 'Dashboard'],
     ['deposits', 'Deposits'],
+    ['salary-savings', 'Salary savings'],
   ]
 
   const mobileTabs = [
     ['dashboard', 'Dashboard'],
     ['deposits', 'Deposits'],
+    ['salary-savings', 'Savings'],
   ]
 
   if (currentPathname === '/privacy') {
@@ -4694,6 +4709,19 @@ function App() {
         </div>
       )}
 
+      {visibleActiveTab === 'salary-savings' && (
+        <SalarySavingsView
+          savings={salarySavings}
+          investments={deposits.filter((deposit) => !deposit.isDeleted)}
+          ownerUserId={activePortfolioOwnerId}
+          isReadOnly={isReadOnlyPortfolio || isDemoMode}
+          selectedFinancialYear={selectedFinancialYear}
+          financialYearOptions={financialYearOptions}
+          onFinancialYearChange={setSelectedFinancialYear}
+          onSaved={async () => setPortfolioReloadSeed((current) => current + 1)}
+        />
+      )}
+
       {visibleActiveTab === 'editor' && (
         <div className="view-stage">
           <DepositEditorView
@@ -4722,6 +4750,7 @@ function App() {
           handleInterestPayoutOverrideChange={handleInterestPayoutOverrideChange}
           linkedFundingAmount={linkedFundingAmount}
           fundingDifference={fundingDifference}
+          salaryFundingSummary={salaryFundingSummary}
           selectedFundingEventId={selectedFundingEventId}
           handleFundingSourceSelect={handleFundingSourceSelect}
           fundingSourceOptions={fundingSourceOptions}

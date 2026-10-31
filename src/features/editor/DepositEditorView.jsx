@@ -55,6 +55,7 @@ export default function DepositEditorView({
   handleInterestPayoutOverrideChange,
   linkedFundingAmount,
   fundingDifference,
+  salaryFundingSummary,
   selectedFundingEventId,
   handleFundingSourceSelect,
   fundingSourceOptions,
@@ -332,6 +333,38 @@ export default function DepositEditorView({
                 </small>
               </label>
             </div>
+          </section>
+
+          <section className="editor-section salary-funding-section">
+            <div className="editor-section-head">
+              <h3>Salary savings funding</h3>
+              <p>Shown separately from maturity and interest funding links below.</p>
+            </div>
+            <div className="editor-funding-summary">
+              <div>
+                <span>From salary savings</span>
+                <strong>{formatCurrency(salaryFundingSummary.total)}</strong>
+              </div>
+              <div>
+                <span>From outside salary</span>
+                <strong>{formatCurrency(salaryFundingSummary.outsideAmount)}</strong>
+              </div>
+              <div>
+                <span>Investment amount</span>
+                <strong>{formatCurrency(formValues.principalAmount)}</strong>
+              </div>
+            </div>
+            {salaryFundingSummary.links.length > 0 ? (
+              <div className="salary-funding-links">
+                {salaryFundingSummary.links.map((link) => (
+                  <span key={`${link.salaryMonth}-${link.amount}`}>
+                    {link.salaryMonth}: {formatCurrency(link.amount)}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="field-help">No salary savings are linked to this investment.</p>
+            )}
           </section>
 
           <section className="editor-section">

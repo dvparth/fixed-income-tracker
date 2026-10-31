@@ -145,6 +145,24 @@ const depositSchema = new mongoose.Schema(
 
 const Deposit = mongoose.model('Deposit', depositSchema)
 
+// Kept separate from investments so existing deposit documents and calculations remain unchanged.
+const salarySavingSchema = new mongoose.Schema(
+  {
+    id: { type: String, required: true, unique: true, index: true },
+    ownerUserId: { type: String, required: true, index: true },
+    salaryMonth: { type: String, required: true },
+    amount: { type: Number, required: true },
+    unavailable: { type: Array, default: [] },
+    investmentAllocations: { type: Array, default: [] },
+    notes: { type: String, default: '' },
+    createdByUserId: { type: String, default: '' },
+    updatedByUserId: { type: String, default: '' },
+  },
+  { collection: 'salarySavings', versionKey: false, timestamps: true },
+)
+salarySavingSchema.index({ ownerUserId: 1, salaryMonth: 1 }, { unique: true })
+const SalarySaving = mongoose.model('SalarySaving', salarySavingSchema)
+
 const masterDataSchema = new mongoose.Schema(
   {
     ownerUserId: { type: String, required: true, unique: true, index: true },
@@ -273,6 +291,23 @@ const shareCreateBodySchema = z.object({
 const allocationSchema = z.object({
   eventId: z.string().trim().min(1).max(260),
   amount: z.number().positive(),
+}).strict()
+const salaryUnavailableSchema = z.object({
+  id: z.string().trim().min(1).max(120).optional(),
+  amount: z.number().positive(),
+  reason: z.string().trim().min(1).max(240),
+}).strict()
+const salaryInvestmentAllocationSchema = z.object({
+  id: z.string().trim().min(1).max(120).optional(),
+  investmentId: z.string().trim().min(1).max(240),
+  amount: z.number().positive(),
+}).strict()
+const salarySavingBodySchema = z.object({
+  salaryMonth: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+  amount: z.number().positive(),
+  unavailable: z.array(salaryUnavailableSchema).optional(),
+  investmentAllocations: z.array(salaryInvestmentAllocationSchema).optional(),
+  notes: optionalTextField,
 }).strict()
 const cashSettlementSchema = z.object({
   eventId: z.string().trim().min(1).max(260),
@@ -1040,7 +1075,7 @@ const sanitizeDepositForBackupExport = (deposit) => ({
     : [],
 })
 
-const buildBackupWorkbookBuffer = ({ portfolioLabel, ownerUserId, deposits, masterData }) => {
+const buildBackupWorkbookBuffer = ({ portfolioLabel, ownerUserId, deposits, masterData, salarySavings = [] }) => {
   const workbook = XLSX.utils.book_new()
   const exportedAt = new Date().toISOString()
   const normalizedMasterData = normalizeMasterData(masterData)
@@ -1059,6 +1094,7 @@ const buildBackupWorkbookBuffer = ({ portfolioLabel, ownerUserId, deposits, mast
     { Field: 'Portfolio label', Value: portfolioLabel },
     { Field: 'Portfolio owner user ID', Value: ownerUserId },
     { Field: 'Investment count', Value: normalizedDeposits.length },
+    { Field: 'Salary savings count', Value: salarySavings.length },
     { Field: 'Owner count', Value: (normalizedMasterData.owners || []).length },
     { Field: 'Institution count', Value: (normalizedMasterData.institutions || []).length },
     { Field: 'Instrument type count', Value: (normalizedMasterData.instrumentTypes || []).length },
@@ -1138,6 +1174,11 @@ const buildBackupWorkbookBuffer = ({ portfolioLabel, ownerUserId, deposits, mast
     XLSX.utils.json_to_sheet(depositRows, { skipHeader: false }),
     BACKUP_SHEETS.deposits,
   )
+  XLSX.utils.book_append_sheet(
+    workbook,
+    XLSX.utils.json_to_sheet(salarySavings.map((saving) => ({ 'Salary savings ID': saving.id, 'Salary month': saving.salaryMonth, Amount: saving.amount, 'Record Data': JSON.stringify(saving) })), { skipHeader: false }),
+    BACKUP_SHEETS.salarySavings,
+  )
 
   return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' })
 }
@@ -1172,6 +1213,9 @@ const parseBackupWorkbook = (buffer) => {
   const branchRows = getBackupSheetRows(workbook, BACKUP_SHEETS.branches)
   const instrumentRows = getBackupSheetRows(workbook, BACKUP_SHEETS.instrumentTypes)
   const depositRows = getBackupSheetRows(workbook, BACKUP_SHEETS.deposits)
+  const salaryRows = workbook.Sheets[BACKUP_SHEETS.salarySavings]
+    ? XLSX.utils.sheet_to_json(workbook.Sheets[BACKUP_SHEETS.salarySavings], { defval: '', raw: false })
+    : []
 
   const institutionsById = new Map(
     institutionRows
@@ -1247,18 +1291,34 @@ const parseBackupWorkbook = (buffer) => {
       parseError,
     }
   })
+  const salarySavings = salaryRows.map((row, index) => {
+    const payloadText = String(row['Record Data'] || '').trim()
+    if (!payloadText) {
+      return { rowNumber: index + 2, parseError: 'Missing full salary savings record data.', payload: null }
+    }
+    try {
+      return { rowNumber: index + 2, parseError: '', payload: JSON.parse(payloadText) }
+    } catch (error) {
+      return {
+        rowNumber: index + 2,
+        parseError: `Could not read salary savings record data: ${error.message}`,
+        payload: null,
+      }
+    }
+  })
 
   return {
     metadataRows,
     masterData,
     deposits,
+    salarySavings,
   }
 }
 
 const isValidBackupDate = (value) =>
   /^\d{4}-\d{2}-\d{2}$/.test(String(value || '').trim())
 
-const validateBackupSnapshot = ({ metadataRows, masterData, deposits }) => {
+const validateBackupSnapshot = ({ metadataRows, masterData, deposits, salarySavings = [] }) => {
   const errors = []
   const rowErrors = []
   const ownerNames = new Set((masterData.owners || []).map((owner) => normalizeText(owner.name)).filter(Boolean))
@@ -1467,6 +1527,119 @@ const validateBackupSnapshot = ({ metadataRows, masterData, deposits }) => {
     }
   })
 
+  const validDepositsById = new Map(
+    parsedDeposits
+      .filter((entry) => entry.errors.length === 0 && entry.payload)
+      .map((entry) => [entry.payload.id, entry.payload]),
+  )
+  const validatedSalarySavings = []
+  const salarySavingsErrors = []
+  const salarySavingIds = new Set()
+  const salaryMonths = new Set()
+
+  salarySavings.forEach((entry, index) => {
+    const rowNumber = Number(entry?.rowNumber) || index + 2
+    const payload = entry && Object.prototype.hasOwnProperty.call(entry, 'payload')
+      ? entry.payload
+      : entry
+    const rowMessages = []
+
+    if (entry?.parseError) {
+      rowMessages.push(entry.parseError)
+    }
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      rowMessages.push('Salary savings record data must be a JSON object.')
+    }
+
+    const id = String(payload?.id || '').trim()
+    const salaryMonth = String(payload?.salaryMonth || '').trim()
+    const amount = payload?.amount
+    const unavailable = payload?.unavailable ?? []
+    const investmentAllocations = payload?.investmentAllocations ?? []
+
+    if (!id) {
+      rowMessages.push('Salary savings ID is missing.')
+    } else if (salarySavingIds.has(id)) {
+      rowMessages.push(`Salary savings ID "${id}" appears more than once.`)
+    } else {
+      salarySavingIds.add(id)
+    }
+
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(salaryMonth)) {
+      rowMessages.push('Salary month must use YYYY-MM format.')
+    } else if (salaryMonths.has(salaryMonth)) {
+      rowMessages.push(`Salary month "${salaryMonth}" appears more than once.`)
+    } else {
+      salaryMonths.add(salaryMonth)
+    }
+
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
+      rowMessages.push('Salary target must be a positive number.')
+    }
+    if (!Array.isArray(unavailable)) {
+      rowMessages.push('Unavailable amounts must be a list.')
+    }
+    if (!Array.isArray(investmentAllocations)) {
+      rowMessages.push('Investment allocations must be a list.')
+    }
+
+    const safeUnavailable = Array.isArray(unavailable) ? unavailable : []
+    const safeAllocations = Array.isArray(investmentAllocations) ? investmentAllocations : []
+    safeUnavailable.forEach((item) => {
+      if (
+        !item || typeof item.amount !== 'number' || !Number.isFinite(item.amount) ||
+        item.amount <= 0 || !String(item.reason || '').trim()
+      ) {
+        rowMessages.push('Unavailable amounts need a positive value and reason.')
+      }
+    })
+
+    safeAllocations.forEach((item) => {
+      const investmentId = String(item?.investmentId || '').trim()
+      if (!item || typeof item.amount !== 'number' || !Number.isFinite(item.amount) || item.amount <= 0) {
+        rowMessages.push('Investment allocations need a positive amount.')
+      }
+      if (!investmentId || !validDepositsById.has(investmentId)) {
+        rowMessages.push(`Investment "${investmentId || '(missing)'}" is not present as a valid investment in this backup.`)
+      } else if (validDepositsById.get(investmentId).isDeleted) {
+        rowMessages.push(`Investment "${investmentId}" is archived and cannot be linked to salary savings.`)
+      }
+    })
+
+    const allocatedAmount = [...safeUnavailable, ...safeAllocations].reduce(
+      (sum, item) => sum + (typeof item?.amount === 'number' ? item.amount : 0),
+      0,
+    )
+    if (typeof amount === 'number' && Number.isFinite(amount) && allocatedAmount > amount + 0.0001) {
+      rowMessages.push('Invested and unavailable amounts cannot exceed the monthly savings amount.')
+    }
+
+    if (rowMessages.length > 0) {
+      salarySavingsErrors.push(`Salary savings row ${rowNumber}: ${rowMessages.join(' ')}`)
+    } else {
+      validatedSalarySavings.push(payload)
+    }
+  })
+
+  const linkedByInvestment = new Map()
+  validatedSalarySavings.forEach((saving) => {
+    ;(saving.investmentAllocations || []).forEach((allocation) => {
+      const investmentId = allocation.investmentId
+      const link = linkedByInvestment.get(investmentId) || { amount: 0 }
+      link.amount += allocation.amount
+      linkedByInvestment.set(investmentId, link)
+    })
+  })
+  linkedByInvestment.forEach((link, investmentId) => {
+    const investment = validDepositsById.get(investmentId)
+    if (investment && link.amount > Number(investment.principalAmount || 0) + 0.0001) {
+      salarySavingsErrors.push(
+        `Salary savings links for investment "${investmentId}" exceed its principal amount (${link.amount} linked, ${investment.principalAmount} principal).`,
+      )
+    }
+  })
+  errors.push(...salarySavingsErrors)
+
   return {
     hasErrors: errors.length > 0 || rowErrors.length > 0,
     errors,
@@ -1490,10 +1663,12 @@ const validateBackupSnapshot = ({ metadataRows, masterData, deposits }) => {
       archivedInvestmentCount: parsedDeposits.filter(
         (entry) => String(entry.payload?.status || '').trim().toLowerCase() === 'closed' || entry.payload?.isDeleted,
       ).length,
+      salarySavingsCount: validatedSalarySavings.length,
     },
     snapshot: {
       masterData,
       deposits: parsedDeposits.filter((entry) => entry.errors.length === 0).map((entry) => entry.payload),
+      salarySavings: validatedSalarySavings,
     },
   }
 }
@@ -3130,6 +3305,120 @@ app.get('/api/deposits', requireAuth, validateRequest(ownerScopedQuerySchema, 'q
   )
 })
 
+const normalizeSalarySaving = (saving, investmentById = new Map()) => {
+  const unavailable = Array.isArray(saving.unavailable) ? saving.unavailable : []
+  const investmentAllocations = Array.isArray(saving.investmentAllocations)
+    ? saving.investmentAllocations
+    : []
+  const unavailableAmount = unavailable.reduce((sum, item) => sum + Number(item.amount || 0), 0)
+  const investedAmount = investmentAllocations.reduce((sum, item) => sum + Number(item.amount || 0), 0)
+  return {
+    ...saving,
+    unavailable,
+    investmentAllocations: investmentAllocations.map((item) => ({
+      ...item,
+      investmentLabel: investmentById.get(item.investmentId) || 'Archived or removed investment',
+    })),
+    unavailableAmount,
+    investedAmount,
+    remainingAmount: Math.max(Number(saving.amount || 0) - unavailableAmount - investedAmount, 0),
+  }
+}
+
+const sanitizeSalarySavingPayload = async (payload, ownerUserId, excludedSavingId = '') => {
+  const parsed = salarySavingBodySchema.parse(payload)
+  const unavailable = (parsed.unavailable || []).map((item) => ({
+    id: item.id || crypto.randomUUID(), amount: item.amount, reason: item.reason,
+  }))
+  const investmentAllocations = (parsed.investmentAllocations || []).map((item) => ({
+    id: item.id || crypto.randomUUID(), investmentId: item.investmentId, amount: item.amount,
+  }))
+  const allocated = [...unavailable, ...investmentAllocations].reduce(
+    (sum, item) => sum + Number(item.amount || 0),
+    0,
+  )
+  if (allocated > parsed.amount + 0.0001) {
+    throw new Error('Invested and unavailable amounts cannot exceed the monthly savings amount.')
+  }
+  const investmentIds = [...new Set(investmentAllocations.map((item) => item.investmentId))]
+  if (investmentIds.length > 0) {
+    const investments = await Deposit.find({
+      ownerUserId,
+      id: { $in: investmentIds },
+      isDeleted: { $ne: true },
+    }).lean()
+    if (investments.length !== investmentIds.length) {
+      throw new Error('One or more selected investments are unavailable.')
+    }
+
+    const otherSavings = await SalarySaving.find({
+      ownerUserId,
+      ...(excludedSavingId ? { id: { $ne: excludedSavingId } } : {}),
+      'investmentAllocations.investmentId': { $in: investmentIds },
+    }).lean()
+    const linkedByInvestment = new Map()
+    otherSavings.forEach((saving) => (saving.investmentAllocations || []).forEach((link) => {
+      if (investmentIds.includes(link.investmentId)) {
+        linkedByInvestment.set(link.investmentId, (linkedByInvestment.get(link.investmentId) || 0) + Number(link.amount || 0))
+      }
+    }))
+    investmentAllocations.forEach((link) => {
+      linkedByInvestment.set(link.investmentId, (linkedByInvestment.get(link.investmentId) || 0) + Number(link.amount || 0))
+    })
+    const overAllocated = investments.find((investment) =>
+      (linkedByInvestment.get(investment.id) || 0) > Number(investment.principalAmount || 0) + 0.0001,
+    )
+    if (overAllocated) {
+      const linkedAmount = linkedByInvestment.get(overAllocated.id) || 0
+      throw new Error(`Salary links for ${overAllocated.bankName || 'this investment'} cannot exceed its investment amount (${Number(overAllocated.principalAmount || 0)}). Currently linked: ${linkedAmount}.`)
+    }
+  }
+  return { ...parsed, unavailable, investmentAllocations }
+}
+
+app.get('/api/salary-savings', requireAuth, validateRequest(ownerScopedQuerySchema, 'query'), resolvePortfolioContext, async (request, response) => {
+  const [savings, investments] = await Promise.all([
+    SalarySaving.find({ ownerUserId: request.portfolioContext.ownerUserId }).sort({ salaryMonth: -1 }).lean(),
+    Deposit.find({ ownerUserId: request.portfolioContext.ownerUserId, isDeleted: { $ne: true } }).lean(),
+  ])
+  const investmentById = new Map(investments.map((item) => [item.id, `${item.bankName || 'Investment'} · ${item.accountNumber || item.id}`]))
+  response.json(savings.map((saving) => normalizeSalarySaving(saving, investmentById)))
+})
+
+app.post('/api/salary-savings', writeRateLimiter, requireAuth, validateRequest(ownerScopedQuerySchema, 'query'), resolvePortfolioContext, requirePortfolioWriteAccess, validateRequest(salarySavingBodySchema), async (request, response) => {
+  try {
+    const payload = await sanitizeSalarySavingPayload(request.body, request.portfolioContext.ownerUserId)
+    const created = await SalarySaving.create({
+      ...payload,
+      id: `salary-${crypto.randomUUID()}`,
+      ownerUserId: request.portfolioContext.ownerUserId,
+      createdByUserId: request.sessionUser.id,
+      updatedByUserId: request.sessionUser.id,
+    })
+    response.status(201).json(normalizeSalarySaving(created.toObject()))
+  } catch (error) {
+    response.status(error?.code === 11000 ? 409 : 400).json({ message: error?.code === 11000 ? 'A savings record already exists for this month.' : error.message })
+  }
+})
+
+app.put('/api/salary-savings/:id', writeRateLimiter, requireAuth, validateRequest(idParamSchema, 'params'), validateRequest(ownerScopedQuerySchema, 'query'), resolvePortfolioContext, requirePortfolioWriteAccess, validateRequest(salarySavingBodySchema), async (request, response) => {
+  try {
+    const payload = await sanitizeSalarySavingPayload(request.body, request.portfolioContext.ownerUserId, request.params.id)
+    const updated = await SalarySaving.findOneAndUpdate(
+      { id: request.params.id, ownerUserId: request.portfolioContext.ownerUserId },
+      { ...payload, updatedByUserId: request.sessionUser.id },
+      { new: true },
+    ).lean()
+    if (!updated) {
+      response.status(404).json({ message: 'Salary savings record not found' })
+      return
+    }
+    response.json(normalizeSalarySaving(updated))
+  } catch (error) {
+    response.status(error?.code === 11000 ? 409 : 400).json({ message: error?.code === 11000 ? 'A savings record already exists for this month.' : error.message })
+  }
+})
+
 app.get('/api/master-data', requireAuth, validateRequest(ownerScopedQuerySchema, 'query'), resolvePortfolioContext, async (request, response) => {
   response.json(
     await getMasterData(request.portfolioContext.ownerUserId, {
@@ -3328,6 +3617,17 @@ app.post('/api/deposits/:id/archive', writeRateLimiter, requireAuth, validateReq
     return
   }
 
+  const salaryLinks = await SalarySaving.find({
+    ownerUserId: request.portfolioContext.ownerUserId,
+    'investmentAllocations.investmentId': request.params.id,
+  }).lean()
+  if (salaryLinks.length > 0) {
+    response.status(409).json({
+      message: 'Cannot archive this investment while it is linked to salary savings. Remove or reassign the salary link first.',
+    })
+    return
+  }
+
   const ownerDeposits = (
     await Deposit.find({ ownerUserId: request.portfolioContext.ownerUserId }).lean()
   ).map(normalizeDepositDoc)
@@ -3387,6 +3687,16 @@ app.delete(
     }
 
     const normalizedExisting = normalizeDepositDoc(existing)
+    const salaryLinks = await SalarySaving.countDocuments({
+      ownerUserId: request.portfolioContext.ownerUserId,
+      'investmentAllocations.investmentId': request.params.id,
+    })
+    if (salaryLinks > 0) {
+      response.status(409).json({
+        message: 'Cannot permanently delete this investment while it is linked to salary savings. Remove or reassign the salary link first.',
+      })
+      return
+    }
     const cleanedChildren = await removeFundingLinksForDeletedDeposit({
       deletedDeposit: normalizedExisting,
       ownerUserId: request.portfolioContext.ownerUserId,
@@ -3445,9 +3755,10 @@ app.get(
   resolvePortfolioContext,
   requirePortfolioWriteAccess,
   async (request, response) => {
-    const [deposits, masterData] = await Promise.all([
+    const [deposits, masterData, salarySavings] = await Promise.all([
       Deposit.find({ ownerUserId: request.portfolioContext.ownerUserId }).lean(),
       getMasterData(request.portfolioContext.ownerUserId, { createIfMissing: true }),
+      SalarySaving.find({ ownerUserId: request.portfolioContext.ownerUserId }).lean(),
     ])
 
     const workbookBuffer = buildBackupWorkbookBuffer({
@@ -3455,6 +3766,7 @@ app.get(
       ownerUserId: request.portfolioContext.ownerUserId,
       deposits,
       masterData,
+      salarySavings,
     })
 
     response.setHeader(
@@ -3543,6 +3855,7 @@ app.post(
     const currentState = await Promise.all([
       Deposit.find({ ownerUserId: request.portfolioContext.ownerUserId }).lean(),
       getMasterData(request.portfolioContext.ownerUserId, { createIfMissing: true }),
+      SalarySaving.find({ ownerUserId: request.portfolioContext.ownerUserId }).lean(),
     ])
 
     const previousDeposits = currentState[0].map(normalizeDepositDoc)
@@ -3553,6 +3866,7 @@ app.post(
       await session.startTransaction()
 
       await Deposit.deleteMany({ ownerUserId: request.portfolioContext.ownerUserId }, { session })
+      await SalarySaving.deleteMany({ ownerUserId: request.portfolioContext.ownerUserId }, { session })
 
       const restoredDeposits = validation.snapshot.deposits.map((deposit) => {
         const snapshot = sanitizeRestoredDepositPayload(deposit)
@@ -3567,6 +3881,16 @@ app.post(
 
       if (restoredDeposits.length > 0) {
         await Deposit.collection.insertMany(restoredDeposits, { session })
+      }
+      const restoredSalarySavings = (validation.snapshot.salarySavings || []).map((saving) => ({
+        ...saving,
+        _id: undefined,
+        ownerUserId: request.portfolioContext.ownerUserId,
+        createdByUserId: String(saving.createdByUserId || request.sessionUser.id),
+        updatedByUserId: String(saving.updatedByUserId || request.sessionUser.id),
+      }))
+      if (restoredSalarySavings.length > 0) {
+        await SalarySaving.collection.insertMany(restoredSalarySavings, { session })
       }
 
       await MasterData.findOneAndUpdate(
@@ -3666,4 +3990,5 @@ if (process.env.NODE_ENV !== 'test' && process.env.SERVER_DISABLE_START !== 'tru
   })
 }
 
+export { parseBackupWorkbook, validateBackupSnapshot }
 export default app
