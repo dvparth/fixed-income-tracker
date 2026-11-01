@@ -7,6 +7,19 @@ export const filterSavingsByFinancialYear = (savings, financialYear) => {
   })
 }
 
+export const createRenewedInvestmentAllocation = (savingId, investment, parentInvestment, amount) => ({
+  id: `${investment.id}-${savingId}`,
+  investmentId: investment.id,
+  amount: Number(amount),
+  investmentLabel: `${investment.bankName || 'Investment'} · ${investment.accountNumber || investment.id}`,
+  investmentDate: investment.investmentDate || '',
+  investmentStatus: investment.status || '',
+  parentInvestmentId: investment.parentInvestmentId || '',
+  parentInvestmentLabel: parentInvestment
+    ? `${parentInvestment.bankName || 'Investment'} · ${parentInvestment.accountNumber || parentInvestment.id}`
+    : '',
+})
+
 export const splitInvestmentAllocations = (saving, investments = []) => {
   const canResolveInvestments = investments.length > 0
   const investmentById = new Map(investments.map((investment) => [investment.id, investment]))

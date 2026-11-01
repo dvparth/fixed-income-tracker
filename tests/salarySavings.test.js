@@ -5,6 +5,7 @@ import mongoose from 'mongoose'
 import request from 'supertest'
 import ExcelJS from 'exceljs'
 import {
+  createRenewedInvestmentAllocation,
   filterSavingsByFinancialYear,
   splitInvestmentAllocations,
   summarizeInvestmentSalaryFunding,
@@ -183,6 +184,31 @@ test('salary savings financial years include April through March boundaries', ()
     filterSavingsByFinancialYear(savings, '2026-27').map((item) => item.salaryMonth),
     ['2026-04', '2027-03'],
   )
+})
+
+test('renewed salary allocations include the successor investment display label', () => {
+  assert.deepEqual(createRenewedInvestmentAllocation(
+    'salary-2026-04',
+    {
+      id: 'fd-1793554719134-sbilk6',
+      bankName: 'SBI',
+      accountNumber: 'SBI-FD-9524',
+      investmentDate: '2026-10-01',
+      status: 'Open',
+      parentInvestmentId: 'old-investment',
+    },
+    { id: 'old-investment', bankName: 'SBI', accountNumber: 'SBI-FD-1234' },
+    '168850',
+  ), {
+    id: 'fd-1793554719134-sbilk6-salary-2026-04',
+    investmentId: 'fd-1793554719134-sbilk6',
+    amount: 168850,
+    investmentLabel: 'SBI · SBI-FD-9524',
+    investmentDate: '2026-10-01',
+    investmentStatus: 'Open',
+    parentInvestmentId: 'old-investment',
+    parentInvestmentLabel: 'SBI · SBI-FD-1234',
+  })
 })
 
 test('salary summaries total targets, invested, unavailable, and remaining amounts', () => {

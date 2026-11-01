@@ -11,7 +11,7 @@ import DepositsView from './features/deposits/DepositsView.jsx'
 import DepositEditorView from './features/editor/DepositEditorView.jsx'
 import MastersView from './features/masters/MastersView.jsx'
 import SalarySavingsView from './features/salary/SalarySavingsView.jsx'
-import { summarizeInvestmentSalaryFunding } from './features/salary/salarySavingsModel.js'
+import { createRenewedInvestmentAllocation, summarizeInvestmentSalaryFunding } from './features/salary/salarySavingsModel.js'
 import { downloadInvestmentsWorkbook } from './features/admin/exportWorkbook.js'
 import { DEMO_PORTFOLIO_LABEL } from '../shared/demoPortfolio.js'
 import { generateOwnerWiseFYTaxSummary, parseFinancialYearLabel } from '../shared/fyTaxEngine.js'
@@ -1078,11 +1078,7 @@ function App() {
               ...saving,
               investmentAllocations: [
                 ...(saving.investmentAllocations || []),
-                {
-                  id: `${savedDeposit.id}-${saving.id}`,
-                  investmentId: savedDeposit.id,
-                  amount: Number(allocation.amount),
-                },
+                createRenewedInvestmentAllocation(saving.id, savedDeposit, deposit, allocation.amount),
               ],
             }
           : saving
@@ -1129,11 +1125,7 @@ function App() {
               ...saving,
               investmentAllocations: [
                 ...(saving.investmentAllocations || []),
-                {
-                  id: `${savedDeposit.id}-${saving.id}`,
-                  investmentId: savedDeposit.id,
-                  amount: Number(allocation.amount),
-                },
+                createRenewedInvestmentAllocation(saving.id, savedDeposit, deposit, allocation.amount),
               ],
             }
           : saving
