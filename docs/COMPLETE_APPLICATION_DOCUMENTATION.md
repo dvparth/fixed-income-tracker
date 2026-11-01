@@ -235,17 +235,23 @@ Responsibilities:
 - top-level state for deposits, master data, filters, active portfolio, and session timeout,
 - API calls and owner-scoped paths,
 - wiring child feature modules.
+- successful portfolio-action feedback for investment create/edit, renew, close, cash settlement, archive, and delete operations. Feedback is announced as a polite status message and can be dismissed; API failures continue to use the existing error banner or form-level error.
 
 The dashboard Owners panel groups non-deleted investments by holder and shows each holder's open-investment count and total principal. Selecting an owner filters dashboard metrics and cash-flow views for that holder; the owner cards remain visible for all holders. The bank/issuer breakdown is always shown and totals principal from open investments in the current dashboard scope, grouped by bank or issuer. With no owner selected, it summarizes the whole active portfolio.
 
-This file is currently the largest frontend coordination point and should be split opportunistically as stable boundaries appear.
+Dashboard presentation is implemented in `src/features/dashboard/DashboardView.jsx`, with dashboard state and derived collections in `src/features/dashboard/useDashboardModel.js`. The "Needs attention" panel links available maturity/interest cash, near-term maturities, and expected near-term interest payouts to their relevant review views.
 
-`src/features/dashboard/dashboardModel.js` contains the issuer aggregation used by the dashboard. It excludes investments that are not open, groups blank issuer names under "Unknown issuer", and sorts by principal descending with issuer name as a tie-breaker.
+`src/features/dashboard/dashboardModel.js` contains dashboard aggregations, including issuer grouping. The issuer aggregation excludes investments that are not open, groups blank issuer names under "Unknown issuer", and sorts by principal descending with issuer name as a tie-breaker.
 
 ### 6.2 Deposits
 
-- `src/features/deposits/DepositsView.jsx`: grouped investment list, detail view, filters, timeline summaries, archive/delete/edit actions.
+- `src/features/deposits/DepositsView.jsx`: coordinates grouped investment list and selected-investment detail behavior, filters, cash summaries, and investment actions.
+- `src/features/deposits/DepositListPanel.jsx`: grouped investment list, status sections, and list filters.
+- `src/features/deposits/DepositDetailPanel.jsx`: investment detail, lifecycle actions, cash activity, and cashflow timeline presentation.
+- `src/features/deposits/depositTimeline.js`: builds chronological investment, interest, reinvestment, settlement, and maturity/closure timeline entries.
 - `src/features/deposits/depositModel.js`: date, tenure, currency, TDS, allocation, interest-event, normalization, and request helpers.
+
+The detail view prioritizes principal, maturity or received date, payout schedule when applicable, interest rate, and the next actionable step. Cash activity (received, reinvested, upcoming, and available cash) and secondary terms, funding/notes, maturity usage, and the full interest schedule are disclosed in expandable sections. The timeline previews a small number of chronological cashflow events and can expand to show the full history. On mobile, supporting detail sections remain in the mobile accordion layout.
 
 ### 6.3 Editor
 

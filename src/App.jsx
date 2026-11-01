@@ -1,21 +1,21 @@
 import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
+import DashboardView from './features/dashboard/DashboardView.jsx'
+import useDashboardModel from './features/dashboard/useDashboardModel.js'
+import { PrivacyPolicyView, TermsOfServiceView } from './features/legal/LegalPages.jsx'
+import SettingsPanel from './features/settings/SettingsPanel.jsx'
 import yieldFlowLogo from './assets/yieldflow-logo.svg'
 import AdminView from './features/admin/AdminView.jsx'
 import AuthView from './features/auth/AuthView.jsx'
 import DepositsView from './features/deposits/DepositsView.jsx'
 import DepositEditorView from './features/editor/DepositEditorView.jsx'
 import MastersView from './features/masters/MastersView.jsx'
-import BackupRestorePanel from './features/settings/BackupRestorePanel.jsx'
-import PortfolioAccessPanel from './features/sharing/PortfolioAccessPanel.jsx'
-import FyTaxView from './features/tax/FyTaxView.jsx'
 import SalarySavingsView from './features/salary/SalarySavingsView.jsx'
 import { summarizeInvestmentSalaryFunding } from './features/salary/salarySavingsModel.js'
 import { downloadInvestmentsWorkbook } from './features/admin/exportWorkbook.js'
-import { summarizeActiveInvestmentsByIssuer } from './features/dashboard/dashboardModel.js'
 import { DEMO_PORTFOLIO_LABEL } from '../shared/demoPortfolio.js'
 import { generateOwnerWiseFYTaxSummary, parseFinancialYearLabel } from '../shared/fyTaxEngine.js'
-import { APP_ACTIVITY_EVENT, TODAY, addDays, computeTdsAmount, computeTdsPercent, deriveTenureParts, emptyForm, formatAllocationsText, formatCurrency, formatDate, formatInterestRate, formatTenure, generateInterestEvents, getCashSettlements, getCurrentFinancialYearRange, getDateSortValue, getEditableNetPayoutValue, getEffectiveMaturityDate, getEffectivePayoutMode, getFinancialYearLabelFromDate, getFinancialYearRangeFromLabel, getFundingAllocations, getHolderSearchTokens, getMaturitySourceEventId, getPayoutModeLabel, getPostTdsAmount, hydrateDeposit, needsPeriodicPayoutSetup, normalizeDeposit, parseAllocationEntries, requestJson, toYmd } from './features/deposits/depositModel.js'
+import { APP_ACTIVITY_EVENT, TODAY, computeTdsAmount, computeTdsPercent, deriveTenureParts, emptyForm, formatAllocationsText, formatCurrency, formatDate, formatInterestRate, formatTenure, generateInterestEvents, getCashSettlements, getCurrentFinancialYearRange, getDateSortValue, getEditableNetPayoutValue, getEffectiveMaturityDate, getEffectivePayoutMode, getFundingAllocations, getMaturitySourceEventId, getPayoutModeLabel, hydrateDeposit, needsPeriodicPayoutSetup, normalizeDeposit, parseAllocationEntries, requestJson, toYmd } from './features/deposits/depositModel.js'
 import { buildOwnerAliasLookup, emptyMasterData, normalizeMasterData } from '../shared/masterData.js'
 
 const ADD_NEW_MASTER_VALUE = '__add_new_master__'
@@ -67,262 +67,9 @@ const createEmptySessionState = () => ({
   activePortfolioOwnerId: '',
 })
 
-function PrivacyPolicyView({ themeClass }) {
-  return (
-    <div className={`shell ${themeClass}`}>
-      <section className="privacy-shell">
-        <article className="panel privacy-card">
-          <div className="privacy-head">
-            <p className="eyebrow">YieldFlow</p>
-            <h1>Privacy Policy</h1>
-            <p className="privacy-updated">Last updated: 03 May 2026</p>
-          </div>
 
-          <div className="privacy-body">
-            <section className="privacy-section">
-              <h2>What YieldFlow does</h2>
-              <p>
-                YieldFlow is a financial lifecycle management tool used to track deposits,
-                interest receipts, maturity cash, reinvestment decisions, and backup snapshots for
-                personal portfolios.
-              </p>
-            </section>
 
-            <section className="privacy-section">
-              <h2>Information used by the application</h2>
-              <p>YieldFlow may store the information you enter for managing your portfolio, including:</p>
-              <ul className="privacy-list">
-                <li>deposit and investment records</li>
-                <li>owners, institutions, branches, and instrument types</li>
-                <li>cashflow allocations, maturity usage, and notes</li>
-                <li>backup files you explicitly download or restore</li>
-              </ul>
-            </section>
 
-            <section className="privacy-section">
-              <h2>Google sign-in</h2>
-              <p>
-                When you sign in with Google, YieldFlow uses your Google identity for
-                authentication. This may include your name, email address, and profile picture so
-                the application can recognize your account and portfolio access.
-              </p>
-            </section>
-
-            <section className="privacy-section">
-              <h2>Google Drive backup access</h2>
-              <p>
-                If you choose the Google Drive backup option, YieldFlow requests permission only
-                to create or update backup files that the application manages in your Google Drive.
-                Google Drive access is used only when you explicitly select the Drive backup
-                feature.
-              </p>
-            </section>
-
-            <section className="privacy-section">
-              <h2>How data is used</h2>
-              <p>YieldFlow uses your data only to provide portfolio management capabilities such as:</p>
-              <ul className="privacy-list">
-                <li>cashflow visibility and interest tracking</li>
-                <li>maturity and reinvestment planning</li>
-                <li>backup and restore operations</li>
-              </ul>
-            </section>
-
-            <section className="privacy-section">
-              <h2>Data sharing</h2>
-              <p>
-                YieldFlow does not use your Google Drive access unless you explicitly request a
-                backup save to Drive. The application does not use portfolio data for advertising.
-              </p>
-            </section>
-
-            <section className="privacy-section">
-              <h2>Data retention and deletion</h2>
-              <p>
-                Portfolio records and backup snapshots are retained only to operate the product
-                features you use. You can delete portfolio entries in the application and remove
-                backup files from your Google Drive at any time. Deleting a local browser profile,
-                exported backup file, or Drive backup may permanently remove access to that data.
-              </p>
-            </section>
-
-            <section className="privacy-section">
-              <h2>Security and risk notice</h2>
-              <p>
-                YieldFlow applies reasonable technical safeguards for authentication and authorized
-                access workflows; however, no system can guarantee absolute security against every
-                threat. You should protect your Google account, keep independent copies of critical
-                records, and promptly revoke access if you suspect unauthorized use.
-              </p>
-            </section>
-
-            <section className="privacy-section">
-              <h2>Policy updates</h2>
-              <p>
-                This policy may be updated as features or legal requirements change. Material
-                updates will be reflected by the "Last updated" date shown on this page.
-              </p>
-            </section>
-
-            <section className="privacy-section">
-              <h2>Contact</h2>
-              <p>
-                For questions about this policy or data usage, contact Parth Dave at{' '}
-                <a href="mailto:parthdave.1984@gmail.com">parthdave.1984@gmail.com</a>.
-              </p>
-            </section>
-          </div>
-
-          <div className="privacy-footer">
-            <a className="secondary-btn compact" href={APP_HOME_URL}>
-              Back to YieldFlow
-            </a>
-            <a
-              className="secondary-btn compact ghost-btn"
-              href={AUTHOR_LINKEDIN_URL}
-              target="_blank"
-              rel="noreferrer"
-            >
-              View LinkedIn
-            </a>
-          </div>
-        </article>
-      </section>
-    </div>
-  )
-}
-
-function TermsOfServiceView({ themeClass }) {
-  return (
-    <div className={`shell ${themeClass}`}>
-      <section className="privacy-shell">
-        <article className="panel privacy-card">
-          <div className="privacy-head">
-            <p className="eyebrow">YieldFlow</p>
-            <h1>Terms of Service</h1>
-            <p className="privacy-updated">Last updated: 03 May 2026</p>
-          </div>
-
-          <div className="privacy-body">
-            <section className="privacy-section">
-              <h2>Use of YieldFlow</h2>
-              <p>
-                YieldFlow is a financial lifecycle management application designed to help users
-                track deposits, interest receipts, maturity cash, reinvestment activity, and
-                portfolio backups. By using the service, you agree to use it only for lawful and
-                authorized purposes.
-              </p>
-            </section>
-
-            <section className="privacy-section">
-              <h2>User responsibility</h2>
-              <p>
-                You are responsible for the accuracy of the financial data you enter into YieldFlow,
-                including investment details, maturity values, payout values, tax-related inputs,
-                and backup files restored into the application.
-              </p>
-            </section>
-
-            <section className="privacy-section">
-              <h2>No financial advice</h2>
-              <p>
-                YieldFlow is a tracking and management tool. It does not provide financial,
-                investment, tax, or legal advice. Any planning, summaries, or estimates shown in
-                the application should be reviewed independently before making financial decisions.
-              </p>
-            </section>
-
-            <section className="privacy-section">
-              <h2>Google services</h2>
-              <p>
-                If you use Google sign-in or Google Drive backup features, you agree to the
-                permissions requested for those features. Google Drive access is used only for the
-                backup workflow you explicitly initiate.
-              </p>
-            </section>
-
-            <section className="privacy-section">
-              <h2>Availability and changes</h2>
-              <p>
-                Features, data formats, and workflows may evolve over time. Backup and restore
-                should be used as a safety mechanism, but users should maintain appropriate care for
-                their own records and validation processes.
-              </p>
-            </section>
-
-            <section className="privacy-section">
-              <h2>Disclaimer of warranties</h2>
-              <p>
-                YieldFlow is provided "as is" and "as available." To the maximum extent permitted
-                by law, no express or implied warranties are made, including warranties of
-                merchantability, fitness for a particular purpose, non-infringement, accuracy,
-                availability, or error-free operation.
-              </p>
-            </section>
-
-            <section className="privacy-section">
-              <h2>Limitation of liability</h2>
-              <p>
-                To the extent permitted by law, YieldFlow and its operator are not liable for any
-                indirect, incidental, special, consequential, exemplary, or punitive damages, or
-                for loss of profits, revenue, data, goodwill, or business interruption arising from
-                use of (or inability to use) the service.
-              </p>
-            </section>
-
-            <section className="privacy-section">
-              <h2>User safeguards and duty to verify</h2>
-              <p>
-                You are solely responsible for maintaining independent records, verifying all
-                calculations and maturity outcomes, and obtaining professional advice before acting
-                on any financial or tax information.
-              </p>
-            </section>
-
-            <section className="privacy-section">
-              <h2>Indemnity</h2>
-              <p>
-                You agree to indemnify and hold harmless the service operator from claims,
-                liabilities, damages, losses, and expenses arising from your misuse of the service,
-                violation of these terms, or violation of applicable law.
-              </p>
-            </section>
-
-            <section className="privacy-section">
-              <h2>Changes to terms</h2>
-              <p>
-                These terms may be updated from time to time. Continued use of YieldFlow after
-                updates are published constitutes acceptance of the revised terms.
-              </p>
-            </section>
-
-            <section className="privacy-section">
-              <h2>Contact</h2>
-              <p>
-                For questions about these terms, contact Parth Dave at{' '}
-                <a href="mailto:parthdave.1984@gmail.com">parthdave.1984@gmail.com</a>.
-              </p>
-            </section>
-          </div>
-
-          <div className="privacy-footer">
-            <a className="secondary-btn compact" href={APP_HOME_URL}>
-              Back to YieldFlow
-            </a>
-            <a
-              className="secondary-btn compact ghost-btn"
-              href={AUTHOR_LINKEDIN_URL}
-              target="_blank"
-              rel="noreferrer"
-            >
-              View LinkedIn
-            </a>
-          </div>
-        </article>
-      </section>
-    </div>
-  )
-}
 
 const normalizeSessionState = (sessionResponse = {}) => ({
   authenticated: Boolean(sessionResponse.authenticated),
@@ -413,46 +160,9 @@ const formatEditableNumber = (value, precision = 4) => {
 const formatWholeNumber = (value) =>
   new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(Number(value || 0))
 
-const getSearchDateTokens = (value) => {
-  if (!value) {
-    return []
-  }
 
-  const date = new Date(`${value}T00:00:00`)
-  if (Number.isNaN(date.getTime())) {
-    return [String(value)]
-  }
 
-  const day = `${date.getDate()}`.padStart(2, '0')
-  const month = `${date.getMonth() + 1}`.padStart(2, '0')
-  const year = `${date.getFullYear()}`
-  const monthShort = date.toLocaleDateString('en-IN', { month: 'short' }).toLowerCase()
 
-  return [
-    value,
-    `${day}/${month}/${year}`,
-    `${day}-${month}-${year}`,
-    `${day} ${monthShort} ${year}`,
-    `${day} ${date.toLocaleDateString('en-IN', { month: 'long' }).toLowerCase()} ${year}`,
-  ]
-}
-
-const getDateFilterTime = (value, boundary = 'start') => {
-  if (!value) {
-    return null
-  }
-
-  const date = new Date(`${value}T00:00:00`)
-  if (Number.isNaN(date.getTime())) {
-    return null
-  }
-
-  if (boundary === 'end') {
-    date.setHours(23, 59, 59, 999)
-  }
-
-  return date.getTime()
-}
 
 const createMasterKey = (value) =>
   String(value || '')
@@ -566,6 +276,7 @@ function App() {
   const [closingInvestmentId, setClosingInvestmentId] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
+  const [portfolioActionFeedback, setPortfolioActionFeedback] = useState('')
   const [portfolioReloadSeed, setPortfolioReloadSeed] = useState(0)
   const [interestFocusMode, setInterestFocusMode] = useState('all')
   const [maturityFocusMode, setMaturityFocusMode] = useState('all')
@@ -1011,759 +722,53 @@ function App() {
         ? `${activePortfolio.ownerDisplayName}'s portfolio`
         : 'your portfolio'
 
-  const cashFlowEvents = useMemo(() => {
-    const events = []
-
-    activeDeposits.forEach((deposit) => {
-      const interestEvents = generateInterestEvents(deposit)
-      events.push(...interestEvents)
-
-      const postTdsAmount = getPostTdsAmount(deposit)
-      if (postTdsAmount !== null) {
-        const realizationDate = getEffectiveMaturityDate(deposit)
-        events.push({
-          eventId: getMaturitySourceEventId(deposit.id),
-          depositId: deposit.id,
-          type: 'Maturity',
-          date: realizationDate,
-          contractualMaturityDate: deposit.maturityDate,
-          closureDate: deposit.closureDate || '',
-          amount: postTdsAmount,
-          grossAmount: Number(deposit.maturityBeforeTax || postTdsAmount),
-          holderName: deposit.holderName,
-          bankName: deposit.bankName,
-          accountNumber: deposit.accountNumber,
-          sourceLabel: 'Post-TDS maturity pool',
-          title: `${deposit.bankName} maturity`,
-        })
-      }
-    })
-
-    return events.sort((left, right) => new Date(left.date) - new Date(right.date))
-  }, [activeDeposits])
-
-  const normalizedSelectedDashboardOwner = String(selectedDashboardOwner || '').trim().toLowerCase()
-
-  const dashboardScopedDeposits = useMemo(
-    () =>
-      normalizedSelectedDashboardOwner
-        ? activeDeposits.filter(
-            (deposit) =>
-              String(deposit.holderName || '').trim().toLowerCase() === normalizedSelectedDashboardOwner,
-          )
-        : activeDeposits,
-    [activeDeposits, normalizedSelectedDashboardOwner],
-  )
-
-  const dashboardScopedCashFlowEvents = useMemo(
-    () =>
-      normalizedSelectedDashboardOwner
-        ? cashFlowEvents.filter(
-            (event) =>
-              String(event.holderName || '').trim().toLowerCase() === normalizedSelectedDashboardOwner,
-          )
-        : cashFlowEvents,
-    [cashFlowEvents, normalizedSelectedDashboardOwner],
-  )
-
-  const financialYearOptions = useMemo(() => {
-    const labels = new Set([currentFinancialYear.label])
-
-    activeDeposits.forEach((deposit) => {
-      ;[
-        deposit.investmentDate,
-        deposit.maturityDate,
-        deposit.closureDate,
-      ].forEach((value) => {
-        const label = getFinancialYearLabelFromDate(value)
-        if (label) {
-          labels.add(label)
-        }
-      })
-    })
-
-    cashFlowEvents.forEach((event) => {
-      const label = getFinancialYearLabelFromDate(event.date)
-      if (label) {
-        labels.add(label)
-      }
-    })
-
-    return Array.from(labels).sort().reverse()
-  }, [activeDeposits, cashFlowEvents, currentFinancialYear.label])
-
-  const selectedFinancialYearRange = useMemo(
-    () => getFinancialYearRangeFromLabel(selectedFinancialYear),
-    [selectedFinancialYear],
-  )
-
-  const cashFlowMap = useMemo(
-    () => new Map(cashFlowEvents.map((event) => [event.eventId, event])),
-    [cashFlowEvents],
-  )
-
-  const settlementMap = useMemo(() => {
-    const map = new Map()
-
-    activeDeposits.forEach((deposit) => {
-      getCashSettlements(deposit).forEach((settlement) => {
-        const current = map.get(settlement.eventId) ?? []
-        map.set(settlement.eventId, [...current, { deposit, ...settlement }])
-      })
-    })
-
-    return map
-  }, [activeDeposits])
-
-  const allocationMap = useMemo(() => {
-    const map = new Map()
-
-    activeDeposits.forEach((deposit) => {
-      getFundingAllocations(deposit).forEach((allocation) => {
-        const eventId = allocation.eventId
-        const current = map.get(eventId) ?? []
-        map.set(eventId, [...current, { deposit, amount: Number(allocation.amount || 0) }])
-      })
-    })
-
-    return map
-  }, [activeDeposits])
-
-  const filteredDeposits = useMemo(() => {
-    const query = deferredSearch.trim().toLowerCase()
-    const queryTerms = query.split(/\s+/).filter(Boolean)
-    const investmentFromTime = getDateFilterTime(investmentDateFrom, 'start')
-    const investmentToTime = getDateFilterTime(investmentDateTo, 'end')
-    const maturityFromTime = getDateFilterTime(maturityDateFrom, 'start')
-    const maturityToTime = getDateFilterTime(maturityDateTo, 'end')
-
-    return activeDeposits
-      .filter((deposit) => (showClosed ? true : deposit.status !== 'Closed'))
-      .filter((deposit) => {
-        const investmentTime = getDateFilterTime(deposit.investmentDate, 'start')
-        const maturityTime = getDateFilterTime(deposit.maturityDate, 'start')
-
-        if (investmentFromTime !== null && (investmentTime === null || investmentTime < investmentFromTime)) {
-          return false
-        }
-        if (investmentToTime !== null && (investmentTime === null || investmentTime > investmentToTime)) {
-          return false
-        }
-        if (maturityFromTime !== null && (maturityTime === null || maturityTime < maturityFromTime)) {
-          return false
-        }
-        if (maturityToTime !== null && (maturityTime === null || maturityTime > maturityToTime)) {
-          return false
-        }
-
-        return true
-      })
-      .filter((deposit) => {
-        if (queryTerms.length === 0) {
-          return true
-        }
-
-        const holderTokens = getHolderSearchTokens(deposit.holderName, ownerAliasLookup)
-        const fundingSourceTokens = getHolderSearchTokens(deposit.fundingSource, ownerAliasLookup)
-        const dateTokens = [
-          ...getSearchDateTokens(deposit.investmentDate),
-          ...getSearchDateTokens(deposit.maturityDate),
-        ]
-
-        const searchableFields = {
-          all: [
-            deposit.bankName,
-            deposit.branchCity,
-            deposit.holderName,
-            deposit.fundingSource,
-            deposit.accountNumber,
-            deposit.id,
-            deposit.instrumentType,
-            deposit.payoutMode,
-            deposit.investmentDate,
-            deposit.maturityDate,
-            ...dateTokens,
-            ...holderTokens,
-            ...fundingSourceTokens,
-            ...getFundingAllocations(deposit).map((allocation) => allocation.eventId),
-          ],
-          holder: [...holderTokens, deposit.holderName],
-          funding: [...fundingSourceTokens, deposit.fundingSource],
-          bank: [deposit.bankName, deposit.branchCity, deposit.accountNumber],
-          dates: dateTokens,
-          instrument: [
-            deposit.instrumentType,
-            formatTenure(deposit),
-            deposit.tenureYears,
-            deposit.tenureMonths,
-            deposit.tenureDays,
-            deposit.payoutMode,
-          ],
-          group: [deposit.id, ...getFundingAllocations(deposit).map((allocation) => allocation.eventId)],
-        }
-
-        const haystack = (searchableFields[searchScope] || searchableFields.all)
-          .join(' ')
-          .toLowerCase()
-
-        return queryTerms.every((term) => haystack.includes(term))
-      })
-      .sort((left, right) => getDateSortValue(left.maturityDate) - getDateSortValue(right.maturityDate))
-  }, [activeDeposits, deferredSearch, investmentDateFrom, investmentDateTo, maturityDateFrom, maturityDateTo, ownerAliasLookup, searchScope, showClosed])
-
-  const selectedDeposit =
-    activeDeposits.find((deposit) => deposit.id === selectedId) ?? null
-
-  const selectedInterestEvents = useMemo(
-    () => (selectedDeposit ? generateInterestEvents(selectedDeposit) : []),
-    [selectedDeposit],
-  )
-
-  const selectedInterestSummary = useMemo(() => {
-    const eventRows = selectedInterestEvents.map((event) => {
-      const isDue = new Date(event.date) <= TODAY
-      const allocations = (allocationMap.get(event.eventId) ?? []).map((entry) => ({
-        ...entry,
-        amount: Number(entry.amount || 0),
-      }))
-      const settlements = (settlementMap.get(event.eventId) ?? []).map((entry) => ({
-        ...entry,
-        amount: Number(entry.amount || 0),
-      }))
-      const allocatedAmount = allocations.reduce((sum, entry) => sum + entry.amount, 0)
-      const settledAmount = settlements.reduce((sum, entry) => sum + entry.amount, 0)
-      const allocatedWithinEventAmount = Math.min(allocatedAmount, Number(event.amount || 0))
-      const externalTopUpAmount = Math.max(allocatedAmount - Number(event.amount || 0), 0)
-      const unallocatedAmount = Math.max(event.amount - allocatedAmount - settledAmount, 0)
-
-      return {
-        ...event,
-        isDue,
-        allocations,
-        settlements,
-        allocatedAmount,
-        allocatedWithinEventAmount,
-        settledAmount,
-        externalTopUpAmount,
-        unallocatedAmount,
-      }
-    })
-
-    return {
-      totalExpected: eventRows.reduce((sum, event) => sum + Number(event.amount || 0), 0),
-      totalAllocated: eventRows.reduce((sum, event) => sum + event.allocatedAmount, 0),
-      totalSettled: eventRows.reduce((sum, event) => sum + event.settledAmount, 0),
-      totalUnallocated: eventRows.reduce((sum, event) => sum + event.unallocatedAmount, 0),
-      totalExternalTopUp: eventRows.reduce((sum, event) => sum + event.externalTopUpAmount, 0),
-      totalDueExpected: eventRows.reduce(
-        (sum, event) => sum + (event.isDue ? Number(event.amount || 0) : 0),
-        0,
-      ),
-      totalDueAllocated: eventRows.reduce(
-        (sum, event) => sum + (event.isDue ? event.allocatedWithinEventAmount : 0),
-        0,
-      ),
-      totalDueSettled: eventRows.reduce(
-        (sum, event) => sum + (event.isDue ? event.settledAmount : 0),
-        0,
-      ),
-      totalDueUnallocated: eventRows.reduce(
-        (sum, event) => sum + (event.isDue ? event.unallocatedAmount : 0),
-        0,
-      ),
-      totalFutureExpected: eventRows.reduce(
-        (sum, event) => sum + (event.isDue ? 0 : Number(event.amount || 0)),
-        0,
-      ),
-      eventRows,
-    }
-  }, [allocationMap, selectedInterestEvents, settlementMap])
-
-  const stats = useMemo(() => {
-    const openDeposits = dashboardScopedDeposits.filter((deposit) => deposit.status === 'Open')
-    const closedDeposits = dashboardScopedDeposits.filter((deposit) => deposit.status === 'Closed')
-    const missingPeriodicPayoutDeposits = dashboardScopedDeposits.filter(needsPeriodicPayoutSetup)
-    const isWithinCurrentFy = (value) => {
-      const time = new Date(value).getTime()
-      return (
-        !Number.isNaN(time) &&
-        time >= selectedFinancialYearRange.start.getTime() &&
-        time <= selectedFinancialYearRange.end.getTime()
-      )
-    }
-    const openPrincipal = openDeposits.reduce(
-      (sum, deposit) => sum + Number(deposit.principalAmount || 0),
-      0,
-    )
-    const nextCashWindowCutoff = addDays(TODAY, DASHBOARD_UPCOMING_CASH_WINDOW_DAYS)
-    const upcomingMaturities = [...openDeposits]
-      .sort((left, right) => getDateSortValue(left.maturityDate) - getDateSortValue(right.maturityDate))
-    const maturityInterestRealizationEvents = dashboardScopedDeposits
-      .filter((deposit) => isWithinCurrentFy(getEffectiveMaturityDate(deposit)))
-      .map((deposit) => {
-        const principalAmount = Number(deposit.principalAmount || 0)
-        const maturityBeforeTax = Number(deposit.maturityBeforeTax || 0)
-        const grossInterestAmount = Math.max(maturityBeforeTax - principalAmount, 0)
-        const netInterestAmount = Math.max(Number(deposit.maturityAfterTax || 0) - principalAmount, 0)
-        const realizationDate = getEffectiveMaturityDate(deposit)
-
-        return {
-          eventId: `realized-maturity-interest:${deposit.id}`,
-          depositId: deposit.id,
-          type: 'Maturity interest',
-          date: realizationDate,
-          contractualMaturityDate: deposit.maturityDate,
-          closureDate: deposit.closureDate || '',
-          amount: grossInterestAmount,
-          grossAmount: grossInterestAmount,
-          netAmount: netInterestAmount,
-          tdsAmount: Math.max(grossInterestAmount - netInterestAmount, 0),
-          holderName: deposit.holderName,
-          bankName: deposit.bankName,
-          accountNumber: deposit.accountNumber,
-          instrumentType: deposit.instrumentType,
-          status: deposit.status,
-          receiptCount: 1,
-          sourceLabel: 'Maturity interest',
-        }
-      })
-      .filter((event) => event.amount > 0 || event.grossAmount > 0)
-    const periodicInterestRealizationEvents = dashboardScopedCashFlowEvents
-      .filter((event) => event.type === 'Interest' && isWithinCurrentFy(event.date))
-      .map((event) => {
-        const grossAmount = Number(event.grossAmount || 0)
-        const netAmount = Number(event.amount || 0)
-
-        return {
-          ...event,
-          type: 'Periodic interest',
-          amount: grossAmount,
-          grossAmount,
-          netAmount,
-          tdsAmount: Math.max(grossAmount - netAmount, 0),
-          instrumentType: event.sourceLabel || 'Interest payout',
-          receiptCount: 1,
-        }
-      })
-    const interestRealizationEvents = [
-      ...maturityInterestRealizationEvents,
-      ...periodicInterestRealizationEvents,
-    ].sort((left, right) => new Date(left.date) - new Date(right.date))
-    const realizedInterestToDateEvents = interestRealizationEvents.filter((event) => new Date(event.date) <= TODAY)
-    const realisedInterest = realizedInterestToDateEvents.reduce(
-      (sum, event) => sum + Number(event.amount || 0),
-      0,
-    )
-    const realisedInterestTds = realizedInterestToDateEvents.reduce(
-      (sum, event) => sum + Number(event.tdsAmount || 0),
-      0,
-    )
-    const realisedNetInterest = realizedInterestToDateEvents.reduce(
-      (sum, event) => sum + Number(event.netAmount ?? event.amount ?? 0),
-      0,
-    )
-    const maturedWithPostTds = dashboardScopedCashFlowEvents.filter(
-      (event) =>
-        event.type === 'Maturity' &&
-        new Date(event.date) <= TODAY &&
-        isWithinCurrentFy(event.date),
-    )
-    const uninvestedMaturityCash = maturedWithPostTds.reduce((sum, event) => {
-      const allocated = (allocationMap.get(event.eventId) ?? []).reduce(
-        (childSum, child) => childSum + Number(child.amount || 0),
-        0,
-      )
-      const settled = (settlementMap.get(event.eventId) ?? []).reduce(
-        (settlementSum, entry) => settlementSum + Number(entry.amount || 0),
-        0,
-      )
-      return sum + Math.max(event.amount - allocated - settled, 0)
-    }, 0)
-    const maturityAwaitingReinvestment = maturedWithPostTds
-      .map((event) => {
-        const allocated = (allocationMap.get(event.eventId) ?? []).reduce(
-          (childSum, child) => childSum + Number(child.amount || 0),
-          0,
-        )
-        const settled = (settlementMap.get(event.eventId) ?? []).reduce(
-          (settlementSum, entry) => settlementSum + Number(entry.amount || 0),
-          0,
-        )
-
-        return {
-          ...event,
-          allocatedAmount: Math.min(allocated, Number(event.amount || 0)),
-          settledAmount: settled,
-          unallocatedAmount: Math.max(Number(event.amount || 0) - allocated - settled, 0),
-        }
-      })
-      .filter((event) => event.unallocatedAmount > 0)
-      .sort((left, right) => new Date(left.date) - new Date(right.date))
-    const dueInterestEvents = dashboardScopedCashFlowEvents.filter(
-      (event) => event.type === 'Interest' && new Date(event.date) <= TODAY && isWithinCurrentFy(event.date),
-    )
-    const futureInterestEvents = dashboardScopedCashFlowEvents.filter(
-      (event) => event.type === 'Interest' && new Date(event.date) > TODAY && isWithinCurrentFy(event.date),
-    )
-    const upcomingCashFlowNext30Days = dashboardScopedCashFlowEvents.filter((event) => {
-      const eventDate = new Date(event.date)
-      return eventDate >= TODAY && eventDate <= nextCashWindowCutoff
-    })
-    const maturingSoonDeposits = openDeposits
-      .filter((deposit) => {
-        if (!deposit.maturityDate) {
-          return false
-        }
-
-        const maturityDate = new Date(`${deposit.maturityDate}T00:00:00`)
-        return maturityDate >= TODAY && maturityDate <= nextCashWindowCutoff
-      })
-      .sort((left, right) => getDateSortValue(left.maturityDate) - getDateSortValue(right.maturityDate))
-    const uninvestedInterestCash = dueInterestEvents.reduce((sum, event) => {
-      const allocated = (allocationMap.get(event.eventId) ?? []).reduce(
-        (childSum, child) => childSum + Number(child.amount || 0),
-        0,
-      )
-      const settled = (settlementMap.get(event.eventId) ?? []).reduce(
-        (settlementSum, entry) => settlementSum + Number(entry.amount || 0),
-        0,
-      )
-      return sum + Math.max(event.amount - allocated - settled, 0)
-    }, 0)
-    const futureInterestCash = futureInterestEvents.reduce(
-      (sum, event) => sum + Number(event.amount || 0),
-      0,
-    )
-    const dueInterestAwaitingReinvestment = dueInterestEvents
-      .map((event) => {
-        const allocated = (allocationMap.get(event.eventId) ?? []).reduce(
-          (childSum, child) => childSum + Number(child.amount || 0),
-          0,
-        )
-        const settled = (settlementMap.get(event.eventId) ?? []).reduce(
-          (settlementSum, entry) => settlementSum + Number(entry.amount || 0),
-          0,
-        )
-
-        return {
-          ...event,
-          allocatedAmount: Math.min(allocated, Number(event.amount || 0)),
-          settledAmount: settled,
-          unallocatedAmount: Math.max(Number(event.amount || 0) - allocated - settled, 0),
-        }
-      })
-      .filter((event) => event.unallocatedAmount > 0)
-      .sort((left, right) => new Date(left.date) - new Date(right.date))
-
-    const dueInterestAwaitingReinvestmentSummary = Array.from(
-      dueInterestAwaitingReinvestment.reduce((map, event) => {
-        const current = map.get(event.depositId)
-        if (current) {
-          current.pendingAmount += event.unallocatedAmount
-          current.receiptCount += 1
-          if (new Date(event.date) < new Date(current.oldestPendingDate)) {
-            current.oldestPendingDate = event.date
-          }
-          return map
-        }
-
-        map.set(event.depositId, {
-          depositId: event.depositId,
-          bankName: event.bankName,
-          holderName: event.holderName,
-          accountNumber: event.accountNumber,
-          pendingAmount: event.unallocatedAmount,
-          receiptCount: 1,
-          oldestPendingDate: event.date,
-        })
-        return map
-      }, new Map()).values(),
-    ).sort((left, right) => new Date(left.oldestPendingDate) - new Date(right.oldestPendingDate))
-
-    const upcomingInterestEvents = dashboardScopedCashFlowEvents
-      .filter((event) => event.type === 'Interest' && new Date(event.date) >= addDays(TODAY, -1))
-    const upcomingInterestSummary = Array.from(
-      futureInterestEvents.reduce((map, event) => {
-        const current = map.get(event.depositId)
-        if (current) {
-          current.futureAmount += Number(event.amount || 0)
-          current.receiptCount += 1
-          if (new Date(event.date) < new Date(current.nextPaymentDate)) {
-            current.nextPaymentDate = event.date
-          }
-          return map
-        }
-
-        map.set(event.depositId, {
-          depositId: event.depositId,
-          bankName: event.bankName,
-          holderName: event.holderName,
-          accountNumber: event.accountNumber,
-          futureAmount: Number(event.amount || 0),
-          receiptCount: 1,
-          nextPaymentDate: event.date,
-          type: event.type,
-        })
-        return map
-      }, new Map()).values(),
-    )
-      .sort((left, right) => new Date(left.nextPaymentDate) - new Date(right.nextPaymentDate))
-
-    const ownerSummary = Array.from(
-      activeDeposits.reduce((map, deposit) => {
-        const key = deposit.holderName || 'Unknown'
-        const current = map.get(key) ?? {
-          holderName: key,
-          totalDeposits: 0,
-          openDeposits: 0,
-          principalAmount: 0,
-          pendingInterestAmount: 0,
-          futureInterestAmount: 0,
-          upcomingCashAmount: 0,
-          nextMaturityDate: '',
-        }
-
-        current.totalDeposits += 1
-        if (deposit.status === 'Open') {
-          current.openDeposits += 1
-          current.principalAmount += Number(deposit.principalAmount || 0)
-
-          if (
-            deposit.maturityDate &&
-            (!current.nextMaturityDate ||
-              getDateSortValue(deposit.maturityDate) < getDateSortValue(current.nextMaturityDate))
-          ) {
-            current.nextMaturityDate = deposit.maturityDate
-          }
-        }
-
-        map.set(key, current)
-        return map
-      }, new Map()).values(),
-    )
-
-    dueInterestAwaitingReinvestment.forEach((event) => {
-      const owner = ownerSummary.find((entry) => entry.holderName === event.holderName)
-      if (owner) {
-        owner.pendingInterestAmount += event.unallocatedAmount
-      }
-    })
-
-    futureInterestEvents.forEach((event) => {
-      const owner = ownerSummary.find((entry) => entry.holderName === event.holderName)
-      if (owner) {
-        owner.futureInterestAmount += Number(event.amount || 0)
-      }
-    })
-
-    upcomingCashFlowNext30Days.forEach((event) => {
-      const owner = ownerSummary.find((entry) => entry.holderName === event.holderName)
-      if (owner) {
-        owner.upcomingCashAmount += Number(event.amount || 0)
-      }
-    })
-
-    ownerSummary.sort((left, right) => left.holderName.localeCompare(right.holderName))
-
-    return {
-      totalDeposits: dashboardScopedDeposits.length,
-      openDeposits: openDeposits.length,
-      closedDeposits: closedDeposits.length,
-      openPrincipal,
-      realisedInterest,
-      realisedInterestTds,
-      realisedNetInterest,
-      upcomingCashNext30Days: upcomingCashFlowNext30Days.reduce(
-        (sum, event) => sum + Number(event.amount || 0),
-        0,
-      ),
-      maturingSoonCount: maturingSoonDeposits.length,
-      maturingSoonAmount: maturingSoonDeposits.reduce(
-        (sum, deposit) => sum + Number(deposit.principalAmount || 0),
-        0,
-      ),
-      upcomingMaturities,
-      uninvestedMaturityCash,
-      maturityAwaitingReinvestment,
-      uninvestedInterestCash,
-      futureInterestCash,
-      interestRealizationEvents: realizedInterestToDateEvents,
-      dueInterestAwaitingReinvestment,
-      dueInterestAwaitingReinvestmentSummary,
-      upcomingInterestEvents,
-      upcomingInterestSummary,
-      missingPeriodicPayoutDeposits,
-      ownerSummary,
-      currentFinancialYearLabel: selectedFinancialYearRange.label,
-    }
-  }, [activeDeposits, allocationMap, dashboardScopedCashFlowEvents, dashboardScopedDeposits, selectedFinancialYearRange.end, selectedFinancialYearRange.label, selectedFinancialYearRange.start, settlementMap])
-
-  const ownerInvestmentIssuerBreakdown = useMemo(
-    () => summarizeActiveInvestmentsByIssuer(dashboardScopedDeposits),
-    [dashboardScopedDeposits],
-  )
-
-  const ownerDashboardCards = useMemo(() => {
-    return stats.ownerSummary.map((owner) => ({
-      ...owner,
-      fyContribution: 0,
-      fyContributionShare: 0,
-      largestSourceLabel: '',
-    }))
-  }, [stats.ownerSummary])
-
-  const dashboardTaxHighlights = useMemo(() => {
-    return {
-      totalTaxableInterest: Number(
-        effectiveTaxSummary?.consolidatedPortfolioSummary?.totalEstimatedTaxableInterest || 0,
-      ),
-    }
-  }, [effectiveTaxSummary])
-
-  const maturityDashboardItems =
-    maturityFocusMode === 'pending'
-      ? stats.maturityAwaitingReinvestment
-      : stats.upcomingMaturities
-
-  const visibleMaturityDashboardItems = showAllMaturityItems
-    ? maturityDashboardItems
-    : maturityDashboardItems.slice(0, DASHBOARD_PREVIEW_LIMIT)
-
-  const realizedInterestInvestmentGroups = useMemo(() => {
-    const depositsById = new Map(
-      dashboardScopedDeposits.map((deposit) => [deposit.id, deposit]),
-    )
-    const contributionsByDepositId = new Map()
-
-    stats.interestRealizationEvents.forEach((event) => {
-      const deposit = depositsById.get(event.depositId)
-      if (!deposit) {
-        return
-      }
-
-      const grossInterest = Number(event.amount || 0)
-      const tdsAmount = Number(event.tdsAmount || 0)
-      const netInterest = Number(event.netAmount ?? event.amount ?? 0)
-      if (grossInterest <= 0 && tdsAmount <= 0 && netInterest <= 0) {
-        return
-      }
-
-      const current = contributionsByDepositId.get(deposit.id) ?? {
-        deposit,
-        grossInterest: 0,
-        tdsAmount: 0,
-        netInterest: 0,
-        maturityReceiptCount: 0,
-        periodicReceiptCount: 0,
-        receiptEvents: [],
-      }
-
-      current.grossInterest += grossInterest
-      current.tdsAmount += tdsAmount
-      current.netInterest += netInterest
-      if (event.type === 'Maturity interest') {
-        current.maturityReceiptCount += 1
-      } else {
-        current.periodicReceiptCount += 1
-      }
-      current.receiptEvents.push({ type: event.type, date: event.date })
-      contributionsByDepositId.set(deposit.id, current)
-    })
-
-    const groupsByOwner = new Map()
-    contributionsByDepositId.forEach((contribution) => {
-      const ownerName = contribution.deposit.holderName || 'Unassigned owner'
-      const group = groupsByOwner.get(ownerName) ?? { ownerName, investments: [] }
-      group.investments.push(contribution)
-      groupsByOwner.set(ownerName, group)
-    })
-
-    return Array.from(groupsByOwner.values())
-      .map((group) => ({
-        ...group,
-        investments: group.investments.sort(
-          (left, right) =>
-            getDateSortValue(left.deposit.maturityDate) -
-              getDateSortValue(right.deposit.maturityDate) ||
-            String(left.deposit.bankName || '').localeCompare(String(right.deposit.bankName || '')),
-        ),
-      }))
-      .sort((left, right) => left.ownerName.localeCompare(right.ownerName))
-  }, [dashboardScopedDeposits, stats.interestRealizationEvents])
-
-  const interestDashboardItems =
-    interestFocusMode === 'pending'
-      ? stats.dueInterestAwaitingReinvestmentSummary
-      : interestFocusMode === 'realizing'
-        ? stats.interestRealizationEvents
-      : stats.upcomingInterestSummary
-
-  const visibleInterestDashboardItems = showAllInterestItems
-    ? interestDashboardItems
-    : interestDashboardItems.slice(0, DASHBOARD_PREVIEW_LIMIT)
-
-  const reinvestmentDashboardItems = useMemo(
-    () =>
-      [
-        ...stats.maturityAwaitingReinvestment.map((event) => ({
-          ...event,
-          reinvestmentType: 'Maturity cash',
-          availableAmount: event.unallocatedAmount,
-        })),
-        ...stats.dueInterestAwaitingReinvestment.map((event) => ({
-          ...event,
-          reinvestmentType: 'Interest cash',
-          availableAmount: event.unallocatedAmount,
-        })),
-      ].sort((left, right) => new Date(left.date) - new Date(right.date)),
-    [stats.dueInterestAwaitingReinvestment, stats.maturityAwaitingReinvestment],
-  )
-
-  const visibleReinvestmentDashboardItems = showAllReinvestmentItems
-    ? reinvestmentDashboardItems
-    : reinvestmentDashboardItems.slice(0, DASHBOARD_PREVIEW_LIMIT)
-
-  const selectedReinvestmentSummary = selectedDeposit
-    ? (() => {
-        const children = allocationMap.get(getMaturitySourceEventId(selectedDeposit.id)) ?? []
-        const settlements = settlementMap.get(getMaturitySourceEventId(selectedDeposit.id)) ?? []
-        const availableAmount = getPostTdsAmount(selectedDeposit)
-        const realizationDate = getEffectiveMaturityDate(selectedDeposit)
-        const reinvestedAmount = children.reduce(
-          (sum, child) => sum + Number(child.amount || 0),
-          0,
-        )
-        const settledAmount = settlements.reduce(
-          (sum, entry) => sum + Number(entry.amount || 0),
-          0,
-        )
-
-        return {
-          availableAmount,
-          reinvestedAmount,
-          settledAmount,
-          settlements,
-          uninvestedAmount: availableAmount === null ? null : Math.max(availableAmount - reinvestedAmount - settledAmount, 0),
-          childCount: children.length,
-          children,
-          realizationDate,
-          isRealized: new Date(`${realizationDate}T00:00:00`) <= TODAY,
-        }
-      })()
-    : null
-
-  const selectedSourceEvents = useMemo(
-    () =>
-      selectedDeposit
-        ? getFundingAllocations(selectedDeposit)
-            .map((allocation) => {
-              const event = cashFlowMap.get(allocation.eventId)
-              return event ? { ...event, allocatedAmount: allocation.amount } : null
-            })
-            .filter(Boolean)
-        : [],
-    [cashFlowMap, selectedDeposit],
-  )
+  const {
+    allocationMap,
+    cashFlowEvents,
+    cashFlowMap,
+    dashboardTaxHighlights,
+    filteredDeposits,
+    financialYearOptions,
+    interestDashboardItems,
+    maturityDashboardItems,
+    normalizedSelectedDashboardOwner,
+    ownerDashboardCards,
+    ownerInvestmentIssuerBreakdown,
+    realizedInterestInvestmentGroups,
+    reinvestmentDashboardItems,
+    selectedDeposit,
+    selectedInterestEvents,
+    selectedInterestSummary,
+    selectedReinvestmentSummary,
+    selectedSourceEvents,
+    settlementMap,
+    stats,
+    visibleInterestDashboardItems,
+    visibleMaturityDashboardItems,
+    visibleReinvestmentDashboardItems,
+  } = useDashboardModel({
+    DASHBOARD_PREVIEW_LIMIT,
+    DASHBOARD_UPCOMING_CASH_WINDOW_DAYS,
+    activeDeposits,
+    currentFinancialYear,
+    deferredSearch,
+    effectiveTaxSummary,
+    interestFocusMode,
+    investmentDateFrom,
+    investmentDateTo,
+    maturityDateFrom,
+    maturityDateTo,
+    maturityFocusMode,
+    ownerAliasLookup,
+    searchScope,
+    selectedDashboardOwner,
+    selectedFinancialYear,
+    selectedId,
+    showAllInterestItems,
+    showAllMaturityItems,
+    showAllReinvestmentItems,
+    showClosed,
+  })
 
   const resetForm = () => {
     setEditingId(null)
@@ -1993,6 +998,7 @@ function App() {
       return null
     }
 
+    setPortfolioActionFeedback('')
     const renewalInvestmentDate = deposit.maturityDate || getEffectiveMaturityDate(deposit)
     const renewalMaturityDate = addTenureToDate(renewalInvestmentDate, deposit)
     const principalAmount = Number(renewalValues?.principalAmount || 0)
@@ -2082,6 +1088,7 @@ function App() {
           : saving
       }))
       focusDepositAfterSave(savedDeposit, true)
+      setPortfolioActionFeedback('Renewal created. The previous investment is closed and the new investment is ready to track.')
       return savedDeposit
     }
 
@@ -2132,6 +1139,7 @@ function App() {
           : saving
       }))
       focusDepositAfterSave(savedDeposit, true)
+      setPortfolioActionFeedback('Renewal created. The previous investment is closed and the new investment is ready to track.')
       return savedDeposit
     } catch (error) {
       setLoadError(error.message)
@@ -2573,6 +1581,7 @@ function App() {
     }
 
     setFormErrors({})
+    setPortfolioActionFeedback('')
 
     const isCreatingDeposit = !editingId
     const normalized = normalizeDeposit(effectiveFormValues, editingId, nextSrNo, currentEditingDeposit)
@@ -2587,6 +1596,7 @@ function App() {
         )
       })
       focusDepositAfterSave(savedDeposit, isCreatingDeposit)
+      setPortfolioActionFeedback(isCreatingDeposit ? 'Investment added.' : 'Investment changes saved.')
       resetForm()
       return
     }
@@ -2614,6 +1624,7 @@ function App() {
       })
 
       focusDepositAfterSave(savedDeposit, isCreatingDeposit)
+      setPortfolioActionFeedback(isCreatingDeposit ? 'Investment added.' : 'Investment changes saved.')
       resetForm()
     } catch (error) {
       setLoadError(error.message)
@@ -2625,6 +1636,7 @@ function App() {
       return null
     }
 
+    setPortfolioActionFeedback('')
     const effectiveCloseValues = {
       closureDate: closeValues?.closureDate ?? toYmd(TODAY),
       maturityBeforeTax: closeValues?.maturityBeforeTax ?? '',
@@ -2650,6 +1662,7 @@ function App() {
       })
       setSelectedId(savedDeposit.id)
       setShowClosed(true)
+      setPortfolioActionFeedback('Investment closed. Maturity cash is now reflected in available cash.')
       return savedDeposit
     }
 
@@ -2670,6 +1683,7 @@ function App() {
       })
       setSelectedId(savedDeposit.id)
       setShowClosed(true)
+      setPortfolioActionFeedback('Investment closed. Maturity cash is now reflected in available cash.')
       return savedDeposit
     } catch (error) {
       setLoadError(error.message)
@@ -2684,6 +1698,7 @@ function App() {
       return
     }
 
+    setPortfolioActionFeedback('')
     const sourceDeposit = deposits.find((deposit) => deposit.id === cashFlowEvent.depositId)
     if (!sourceDeposit) {
       return
@@ -2737,6 +1752,7 @@ function App() {
           current.map((deposit) => (deposit.id === savedDeposit.id ? savedDeposit : deposit)),
         )
       })
+      setPortfolioActionFeedback('Cash flow marked settled outside YieldFlow; available-to-reinvest totals updated.')
       return
     }
 
@@ -2761,6 +1777,7 @@ function App() {
           current.map((deposit) => (deposit.id === savedDeposit.id ? savedDeposit : deposit)),
         )
       })
+      setPortfolioActionFeedback('Cash flow marked settled outside YieldFlow; available-to-reinvest totals updated.')
     } catch (error) {
       setLoadError(error.message)
     } finally {
@@ -2836,6 +1853,7 @@ function App() {
       return
     }
 
+    setPortfolioActionFeedback('')
     if (isDemoMode) {
       const archivedDeposit = hydrateDeposit({
         ...selectedDeposit,
@@ -2855,6 +1873,7 @@ function App() {
         resetForm()
       }
       setArchiveTargetId(null)
+      setPortfolioActionFeedback('Investment archived.')
       return
     }
 
@@ -2884,6 +1903,7 @@ function App() {
         resetForm()
       }
       setArchiveTargetId(null)
+      setPortfolioActionFeedback('Investment archived.')
     } catch (error) {
       setLoadError(error.message)
     } finally {
@@ -2900,6 +1920,7 @@ function App() {
       return
     }
 
+    setPortfolioActionFeedback('')
     try {
       setIsDeleting(true)
       setLoadError('')
@@ -2924,6 +1945,7 @@ function App() {
         resetForm()
       }
       setDeleteTargetId(null)
+      setPortfolioActionFeedback('Investment permanently deleted.')
     } catch (error) {
       setLoadError(error.message)
     } finally {
@@ -3195,7 +2217,9 @@ function App() {
         ? 'These are deposits whose maturity money has come in but is still not fully used.'
         : 'These are the next deposits that will mature soon.',
     'interest-section':
-      interestFocusMode === 'realizing'
+      interestFocusMode === 'upcoming'
+        ? `These are periodic interest payouts expected in the next ${DASHBOARD_UPCOMING_CASH_WINDOW_DAYS} days.`
+        : interestFocusMode === 'realizing'
         ? 'These are actual gross interest receipts earned to date in the selected FY, including maturity interest and periodic payouts.'
         : interestFocusMode === 'pending'
         ? 'These are interest amounts already received and still available to reinvest.'
@@ -3460,12 +2484,110 @@ function App() {
     scrollToDashboardSection('dashboard-reinvestment-section')
   }
 
+  const showUpcomingMaturityDrilldown = () => {
+    setIsReinvestmentDrilldownOpen(false)
+    setMaturityFocusMode('all')
+    setShowAllMaturityItems(false)
+    scrollToDashboardSection('dashboard-maturity-section')
+  }
+
+  const showUpcomingPayoutsDrilldown = () => {
+    setIsReinvestmentDrilldownOpen(false)
+    setInterestFocusMode('upcoming')
+    setShowAllInterestItems(false)
+    scrollToDashboardSection('dashboard-interest-section')
+  }
+
   const handleBulkImportSuccess = async () => {
     setPortfolioReloadSeed((current) => current + 1)
   }
 
   const handleBackupRestoreSuccess = async () => {
     setPortfolioReloadSeed((current) => current + 1)
+  }
+
+  const dashboardProps = {
+    dashboardPreviewLimit: DASHBOARD_PREVIEW_LIMIT,
+    dashboardUpcomingCashWindowDays: DASHBOARD_UPCOMING_CASH_WINDOW_DAYS,
+    dashboardTaxHighlights,
+    effectiveTaxSummary,
+    effectiveTaxSummaryError,
+    financialYearOptions,
+    formatCurrency,
+    formatDate,
+    formatInterestRate,
+    formatWholeNumber,
+    getDateSortValue,
+    handleActionCardKeyDown,
+    interestDashboardItems,
+    interestFocusMode,
+    isEffectiveTaxSummaryLoading,
+    isMobileEditorScreen,
+    isReinvestmentDrilldownOpen,
+    isTaxViewOpen,
+    maturityDashboardItems,
+    maturityFocusMode,
+    normalizedSelectedDashboardOwner,
+    openDepositDrilldown,
+    openDepositFromInterestEvent,
+    ownerDashboardCards,
+    ownerInvestmentIssuerBreakdown,
+    realizedInterestInvestmentGroups,
+    reinvestmentDashboardItems,
+    renderHelpHint,
+    selectedDashboardOwner,
+    selectedFinancialYear,
+    setInterestFocusMode,
+    setIsReinvestmentDrilldownOpen,
+    setIsTaxViewOpen,
+    setMaturityFocusMode,
+    setSelectedDashboardOwner,
+    setSelectedFinancialYear,
+    setShowAllInterestItems,
+    setShowAllMaturityItems,
+    setShowAllReinvestmentItems,
+    showAllInterestItems,
+    showAllMaturityItems,
+    showAllReinvestmentItems,
+    showRealizedInterestDrilldown,
+    showReinvestmentDrilldown,
+    showUpcomingMaturityDrilldown,
+    showUpcomingPayoutsDrilldown,
+    stats,
+    visibleInterestDashboardItems,
+    visibleMaturityDashboardItems,
+    visibleReinvestmentDashboardItems,
+  }
+
+  const settingsPanelProps = {
+    activePortfolioLabel,
+    activePortfolioOwnerId,
+    brokenAvatarUrl,
+    canEditPortfolio,
+    canUseAdmin,
+    expandedSettingsSection,
+    handleBackupRestoreSuccess,
+    handleCreateShare,
+    handleDeleteShare,
+    isAdminUser,
+    isDemoMode,
+    isReadOnlyPortfolio,
+    isSubmittingShare,
+    openAdmin,
+    sessionState,
+    setActivePortfolioOwnerId,
+    setActiveTab,
+    setBrokenAvatarUrl,
+    setIsSettingsOpen,
+    setMastersReturnTarget,
+    setShareEmail,
+    setThemeClass,
+    shareEmail,
+    shareFeedback,
+    sharesState,
+    themeClass,
+    toggleSettingsSection,
+    visibleActiveTab,
   }
 
   const desktopTabs = [
@@ -3481,11 +2603,11 @@ function App() {
   ]
 
   if (currentPathname === '/privacy') {
-    return <PrivacyPolicyView themeClass={themeClass} />
+    return <PrivacyPolicyView themeClass={themeClass} appHomeUrl={APP_HOME_URL} authorLinkedinUrl={AUTHOR_LINKEDIN_URL} />
   }
 
   if (currentPathname === '/terms') {
-    return <TermsOfServiceView themeClass={themeClass} />
+    return <TermsOfServiceView themeClass={themeClass} appHomeUrl={APP_HOME_URL} authorLinkedinUrl={AUTHOR_LINKEDIN_URL} />
   }
 
   if (!sessionState.authenticated && !isDemoMode) {
@@ -3649,257 +2771,9 @@ function App() {
       )}
 
       {isSettingsOpen && (
-        <section className="settings-panel panel">
-          <div className="section-head">
-            <div>
-              <h2>Settings</h2>
-              <p>Manage your account, sharing, backups, and other settings.</p>
-            </div>
-            <button
-              type="button"
-              className="secondary-btn compact ghost-btn"
-              onClick={() => setIsSettingsOpen(false)}
-              >
-                Close
-              </button>
-          </div>
-
-          <div className="settings-accordion">
-            <section className="settings-accordion-item">
-              <button
-                type="button"
-                className="settings-accordion-toggle"
-                onClick={() => toggleSettingsSection('sharing')}
-                aria-expanded={expandedSettingsSection === 'sharing'}
-              >
-                <div>
-                  <strong>Portfolio sharing</strong>
-                  <span>Choose who can view this portfolio and how sharing works.</span>
-                </div>
-                <span className="settings-accordion-indicator" aria-hidden="true">
-                  {expandedSettingsSection === 'access' ? '−' : '+'}
-                </span>
-              </button>
-              {expandedSettingsSection === 'sharing' ? (
-                isDemoMode ? (
-                  <section className="settings-section settings-section-subtle">
-                    <div className="demo-locked-card">
-                      <strong>Portfolio sharing is available after sign-in.</strong>
-                      <p>Real portfolios can be shared read-only with another Google user.</p>
-                      <a className="primary-btn compact" href="/">Sign in</a>
-                    </div>
-                  </section>
-                ) : (
-                  <PortfolioAccessPanel
-                    isOwnerPortfolio={!isReadOnlyPortfolio}
-                    activePortfolioLabel={activePortfolioLabel}
-                    shareEmail={shareEmail}
-                    setShareEmail={setShareEmail}
-                    onCreateShare={handleCreateShare}
-                    onDeleteShare={handleDeleteShare}
-                    ownedShares={sharesState.ownerShares}
-                    sharedWithMe={sharesState.sharedWithMe}
-                    isSubmittingShare={isSubmittingShare}
-                    shareFeedback={shareFeedback}
-                    showHeader={false}
-                  />
-                )
-              ) : null}
-            </section>
-
-            <section className="settings-accordion-item">
-              <button
-                type="button"
-                className="settings-accordion-toggle"
-                onClick={() => toggleSettingsSection('account')}
-                aria-expanded={expandedSettingsSection === 'account'}
-              >
-                <div>
-                  <strong>My account</strong>
-                  <span>Your account details and the portfolio you are currently viewing.</span>
-                </div>
-                <span className="settings-accordion-indicator" aria-hidden="true">
-                  {expandedSettingsSection === 'profile' ? '−' : '+'}
-                </span>
-              </button>
-              {expandedSettingsSection === 'account' ? (
-                <section className="settings-section">
-                  {isDemoMode ? (
-                    <div className="demo-locked-card">
-                      <strong>Account settings are locked in demo mode.</strong>
-                      <p>Sign in with Google to create your own private portfolio, manage account details, and keep saved data.</p>
-                      <a className="primary-btn compact" href="/">Sign in</a>
-                    </div>
-                  ) : (
-                  <>
-                  <div className="settings-profile">
-                    {sessionState.user?.photoUrl && sessionState.user.photoUrl !== brokenAvatarUrl ? (
-                      <img
-                        className="settings-avatar"
-                        src={sessionState.user.photoUrl}
-                        alt={sessionState.user.displayName}
-                        referrerPolicy="no-referrer"
-                        onError={() => setBrokenAvatarUrl(sessionState.user?.photoUrl || '__unknown__')}
-                      />
-                    ) : (
-                      <div className="settings-avatar fallback-avatar" aria-hidden="true">
-                        {String(sessionState.user?.displayName || sessionState.user?.email || 'Y')
-                          .trim()
-                          .slice(0, 1)
-                          .toUpperCase()}
-                      </div>
-                    )}
-                    <div className="settings-profile-copy">
-                      <strong>{sessionState.user?.displayName}</strong>
-                      <span>{sessionState.user?.email}</span>
-                    </div>
-                  </div>
-
-                  <div className="settings-grid">
-                    <div className="field settings-static-field">
-                      <span>Role</span>
-                      <strong>{isAdminUser ? 'Admin' : 'User'}</strong>
-                    </div>
-
-                    <label className="field">
-                      <span>Viewing portfolio</span>
-                      <select
-                        value={activePortfolioOwnerId}
-                        onChange={(event) => setActivePortfolioOwnerId(event.target.value)}
-                      >
-                        {sessionState.accessiblePortfolios.map((portfolio) => (
-                          <option key={portfolio.ownerUserId} value={portfolio.ownerUserId}>
-                            {portfolio.accessType === 'owner'
-                              ? 'My portfolio'
-                              : `${portfolio.ownerDisplayName}${portfolio.accessType === 'admin' ? '' : ' (Shared)'}`}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                  </>
-                  )}
-                </section>
-              ) : null}
-            </section>
-
-            <section className="settings-accordion-item">
-              <button
-                type="button"
-                className="settings-accordion-toggle"
-                onClick={() => toggleSettingsSection('appearance')}
-                aria-expanded={expandedSettingsSection === 'appearance'}
-              >
-                <div>
-                  <strong>Appearance</strong>
-                  <span>Theme and display choices for this session.</span>
-                </div>
-                <span className="settings-accordion-indicator" aria-hidden="true">
-                  {expandedSettingsSection === 'preferences' ? '−' : '+'}
-                </span>
-              </button>
-              {expandedSettingsSection === 'appearance' ? (
-                <section className="settings-section settings-section-subtle">
-                  <div className="settings-grid settings-grid-compact">
-                    <label className="field">
-                      <span>Theme</span>
-                      <select value={themeClass} onChange={(event) => setThemeClass(event.target.value)}>
-                        <option value="theme-midnight-navy">Midnight Navy</option>
-                        <option value="theme-professional">Professional</option>
-                        <option value="theme-cream">Cream</option>
-                      </select>
-                    </label>
-                  </div>
-                </section>
-              ) : null}
-            </section>
-
-            <section className="settings-accordion-item">
-              <button
-                type="button"
-                className="settings-accordion-toggle"
-                onClick={() => toggleSettingsSection('advanced')}
-                aria-expanded={expandedSettingsSection === 'advanced'}
-              >
-                <div>
-                  <strong>Advanced</strong>
-                  <span>Backup, restore, and other less frequently used tools.</span>
-                </div>
-                <span className="settings-accordion-indicator" aria-hidden="true">
-                  {expandedSettingsSection === 'advanced' ? '−' : '+'}
-                </span>
-              </button>
-              {expandedSettingsSection === 'advanced' ? (
-                <section className="settings-section settings-section-subtle">
-                  <div className="settings-subsection">
-                    <div className="section-head">
-                      <div>
-                        <h2>Backup &amp; restore</h2>
-                        <p>Protect your data with backups and restore only when needed.</p>
-                      </div>
-                    </div>
-                    {canEditPortfolio ? (
-                      isDemoMode ? (
-                        <div className="demo-locked-card">
-                          <strong>Backup and restore are disabled for the public demo.</strong>
-                          <p>Signed-in portfolios can download Excel backups, use Google Drive backup, and restore reviewed backup files.</p>
-                          <a className="primary-btn compact" href="/">Sign in</a>
-                        </div>
-                      ) : (
-                        <BackupRestorePanel
-                          ownerUserId={activePortfolioOwnerId}
-                          portfolioLabel={activePortfolioLabel}
-                          loginEmail={sessionState.user?.email || ''}
-                          isReadOnly={isReadOnlyPortfolio}
-                          onRestoreSuccess={handleBackupRestoreSuccess}
-                        />
-                      )
-                    ) : (
-                      <p className="settings-subsection-empty">
-                        Backup and restore are available only when you can edit this portfolio.
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="settings-subsection">
-                    <div className="section-head">
-                      <div>
-                        <h2>System Configuration</h2>
-                        <p>Reference data and admin tools used less often.</p>
-                      </div>
-                    </div>
-                    <div className="settings-actions">
-                      {canUseAdmin && (
-                        <button type="button" className="secondary-btn compact" onClick={openAdmin}>
-                          Open Admin
-                        </button>
-                      )}
-                      {isDemoMode && (
-                        <div className="demo-locked-card compact-demo-locked-card">
-                          <strong>Admin tools are not part of the public demo.</strong>
-                          <p>Production admins can export data and perform controlled high-risk actions.</p>
-                        </div>
-                      )}
-                      {canEditPortfolio && (
-                        <button
-                          type="button"
-                          className="secondary-btn compact"
-                          onClick={() => {
-                            setMastersReturnTarget(visibleActiveTab)
-                            setActiveTab('masters')
-                            setIsSettingsOpen(false)
-                          }}
-                        >
-                          Open Masters
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </section>
-              ) : null}
-            </section>
-          </div>
-        </section>
+        <SettingsPanel
+          {...settingsPanelProps}
+        />
       )}
 
       {showHeroStrip && (
@@ -3943,6 +2817,15 @@ function App() {
           {isLoading ? (isDemoMode ? 'Loading demo portfolio...' : 'Loading your portfolio...') : loadError}
         </section>
       )}
+
+      {!isLoading && portfolioActionFeedback ? (
+        <section className="status-banner status-banner-action" role="status" aria-live="polite">
+          <span>{portfolioActionFeedback}</span>
+          <button type="button" onClick={() => setPortfolioActionFeedback('')}>
+            Dismiss
+          </button>
+        </section>
+      ) : null}
 
       {!isLoading && isReadOnlyPortfolio && (
         <section className="status-banner warning">
@@ -4019,665 +2902,7 @@ function App() {
         </div>
       )}
 
-      {visibleActiveTab === 'dashboard' && (
-        <section className="dashboard-layout view-stage">
-          <div className="stack">
-            <article className="panel">
-              <div className="section-head">
-                <div>
-                  <h2>Overview</h2>
-                  <p>Select the financial year.</p>
-                  {selectedDashboardOwner ? (
-                    <div className="dashboard-filter-chips">
-                      <span className="pill open">{selectedDashboardOwner}</span>
-                      <button
-                        type="button"
-                        className="mini-link"
-                        onClick={() => setSelectedDashboardOwner('')}
-                      >
-                        Clear selection
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-                <label className="field fy-select">
-                  <span>Financial year</span>
-                  <select
-                    value={selectedFinancialYear}
-                    onChange={(event) => setSelectedFinancialYear(event.target.value)}
-                  >
-                    {financialYearOptions.map((label) => (
-                      <option key={label} value={label}>
-                        FY {label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-            </article>
-
-            <div className="stats-grid">
-              <article className="stat-card accent">
-                <span className="stat-label-row">
-                  <span>Current investments</span>
-                  {renderHelpHint('active-principal', 'This is the total amount currently invested in open deposits.')}
-                </span>
-                <strong>{formatCurrency(stats.openPrincipal)}</strong>
-                <small>{stats.openDeposits} active</small>
-              </article>
-              <article
-                className="stat-card stat-card-action stat-card-wider fy-interest-card clickable-surface"
-                role="button"
-                tabIndex={0}
-                onClick={showRealizedInterestDrilldown}
-                onKeyDown={(event) => handleActionCardKeyDown(event, showRealizedInterestDrilldown)}
-              >
-                <span className="stat-label-row">
-                  <span>Interest earned to date this FY</span>
-                  {renderHelpHint('interest-realised', 'Actual gross interest earned to date in the selected FY, before TDS.')}
-                </span>
-                <div className="stat-metric-grid">
-                  <div className="stat-metric-primary">
-                    <span>Gross</span>
-                    <strong>{formatCurrency(stats.realisedInterest)}</strong>
-                  </div>
-                  <div>
-                    <span>TDS deducted</span>
-                    <strong>{formatCurrency(stats.realisedInterestTds)}</strong>
-                  </div>
-                  <div>
-                    <span>Net</span>
-                    <strong>{formatCurrency(stats.realisedNetInterest)}</strong>
-                  </div>
-                </div>
-                <small>FY {stats.currentFinancialYearLabel} | View receipts</small>
-              </article>
-              <article
-                className="stat-card stat-card-action warning clickable-surface"
-                role="button"
-                tabIndex={0}
-                onClick={showReinvestmentDrilldown}
-                onKeyDown={(event) => handleActionCardKeyDown(event, showReinvestmentDrilldown)}
-              >
-                <span className="stat-label-row">
-                  <span>Cash to reinvest</span>
-                  {renderHelpHint(
-                    'cash-to-reinvest',
-                    'Maturity cash and interest cash already received but not yet fully used in new investments.',
-                  )}
-                </span>
-                <strong>{formatCurrency(stats.uninvestedMaturityCash + stats.uninvestedInterestCash)}</strong>
-                <small>
-                  Maturity {formatCurrency(stats.uninvestedMaturityCash)} | Interest {formatCurrency(stats.uninvestedInterestCash)}
-                </small>
-              </article>
-            </div>
-
-            <article className="panel owner-investment-breakdown">
-              <div className="section-head">
-                <div>
-                  <h2>Investment value by bank / issuer</h2>
-                  <p>
-                    {selectedDashboardOwner
-                      ? `Active principal for ${selectedDashboardOwner}.`
-                      : 'Active principal across all owners.'}
-                  </p>
-                </div>
-              </div>
-              {ownerInvestmentIssuerBreakdown.length > 0 ? (
-                <ul className="owner-investment-breakdown-list">
-                  {ownerInvestmentIssuerBreakdown.map((issuer) => (
-                    <li className="owner-investment-breakdown-row" key={issuer.issuerName}>
-                      <div className="owner-investment-breakdown-copy">
-                        <strong>{issuer.issuerName}</strong>
-                        <span>
-                          {issuer.investmentCount} active investment{issuer.investmentCount === 1 ? '' : 's'}
-                        </span>
-                      </div>
-                      <strong className="owner-investment-breakdown-value">
-                        {formatCurrency(issuer.principalAmount)}
-                      </strong>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="lineage-empty">
-                  {selectedDashboardOwner
-                    ? `No active investments to show for ${selectedDashboardOwner}.`
-                    : 'No active investments to show.'}
-                </p>
-              )}
-            </article>
-
-            {!isTaxViewOpen ? (
-            <article className="panel tax-inline-summary-card">
-              <div className="tax-inline-summary-copy">
-                <span className="eyebrow">FY {selectedFinancialYear}</span>
-                <strong>{formatCurrency(dashboardTaxHighlights.totalTaxableInterest)}</strong>
-                <p>
-                  {`Cash in next ${DASHBOARD_UPCOMING_CASH_WINDOW_DAYS} days ${formatCurrency(stats.upcomingCashNext30Days)}`}
-                  {' | '}
-                  {`Maturing soon ${stats.maturingSoonCount} ${stats.maturingSoonCount === 1 ? 'deposit' : 'deposits'}`}
-                </p>
-              </div>
-              <button
-                type="button"
-                className="secondary-btn compact dashboard-action-btn"
-                onClick={() => setIsTaxViewOpen(true)}
-              >
-                View tax details
-              </button>
-            </article>
-            ) : null}
-
-            <FyTaxView
-              summary={effectiveTaxSummary}
-              selectedFinancialYear={selectedFinancialYear}
-              isLoading={isEffectiveTaxSummaryLoading}
-              error={effectiveTaxSummaryError}
-              formatCurrency={formatCurrency}
-              isOpen={isTaxViewOpen}
-              onClose={() => setIsTaxViewOpen(false)}
-              selectedOwnerName={selectedDashboardOwner}
-              onSelectOwner={setSelectedDashboardOwner}
-              onOpenInvestmentDetail={(investment) =>
-                openDepositDrilldown(
-                  investment.investmentId,
-                  investment.accountNumber || investment.investmentId,
-                )
-              }
-            />
-
-            {isReinvestmentDrilldownOpen ? (
-              <article id="dashboard-reinvestment-section" className="panel">
-                <div className="section-head">
-                  <div>
-                    <div className="section-title-row">
-                      <h2>Cash to reinvest</h2>
-                      {renderHelpHint(
-                        'cash-to-reinvest-section',
-                        'Maturity cash and interest cash already received but not yet fully used in new investments.',
-                      )}
-                    </div>
-                    <p>Available maturity and interest cash, shown together in date order.</p>
-                  </div>
-                  <div className="section-head-actions">
-                    {reinvestmentDashboardItems.length > DASHBOARD_PREVIEW_LIMIT ? (
-                      <button
-                        type="button"
-                        className="secondary-btn compact ghost-btn dashboard-toggle-btn"
-                        onClick={() => setShowAllReinvestmentItems((current) => !current)}
-                      >
-                        {showAllReinvestmentItems ? 'Show fewer' : 'View all cash'}
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="secondary-btn compact ghost-btn dashboard-toggle-btn"
-                      onClick={() => {
-                        setIsReinvestmentDrilldownOpen(false)
-                        setMaturityFocusMode('all')
-                        setInterestFocusMode('all')
-                      }}
-                    >
-                      Back to timelines
-                    </button>
-                  </div>
-                </div>
-                <div className="list timeline-preview-list">
-                  {visibleReinvestmentDashboardItems.length > 0 ? (
-                    visibleReinvestmentDashboardItems.map((event) => (
-                      <button
-                        key={event.eventId}
-                        type="button"
-                        className="deposit-card clickable-surface"
-                        onClick={() =>
-                          openDepositDrilldown(
-                            event.depositId,
-                            event.accountNumber || event.depositId,
-                          )
-                        }
-                      >
-                        <div className="deposit-topline">
-                          <strong>{event.bankName}</strong>
-                          <span className={event.reinvestmentType === 'Maturity cash' ? 'pill closed' : 'pill open'}>
-                            {event.reinvestmentType}
-                          </span>
-                        </div>
-                        <p>{event.holderName} | {event.accountNumber || 'No account number'}</p>
-                        <p>{event.instrumentType || event.sourceLabel || 'Interest'}</p>
-                        <p>
-                          Received {formatDate(event.date)} | Available to reinvest {formatCurrency(event.availableAmount)}
-                        </p>
-                      </button>
-                    ))
-                  ) : (
-                    <div className="empty-state-card">
-                      <div className="empty-state-icon" aria-hidden="true">○</div>
-                      <p className="lineage-empty">No received maturity or interest cash is available to reinvest.</p>
-                    </div>
-                  )}
-                </div>
-              </article>
-            ) : (
-              <>
-            <article id="dashboard-maturity-section" className="panel">
-              <div className="section-head">
-                <div>
-                  <div className="section-title-row">
-                    <h2>
-                      {maturityFocusMode === 'pending' ? 'Maturity to reinvest' : 'Maturity timeline'}
-                    </h2>
-                    {renderHelpHint(
-                      'maturity-section',
-                      maturityFocusMode === 'pending'
-                        ? 'These are deposits whose maturity money has come in but is still not fully used.'
-                        : 'These are the next deposits that will mature soon.',
-                    )}
-                  </div>
-                  <p>
-                    {maturityFocusMode === 'pending'
-                      ? 'Closed deposits whose maturity cash is still waiting to be reused.'
-                      : 'Next maturities and reinvestment opportunities.'}
-                  </p>
-                </div>
-                <div className="section-head-actions">
-                {maturityDashboardItems.length > DASHBOARD_PREVIEW_LIMIT ? (
-                    <button
-                      type="button"
-                      className="secondary-btn compact ghost-btn dashboard-toggle-btn"
-                      onClick={() => setShowAllMaturityItems((current) => !current)}
-                    >
-                      {showAllMaturityItems ? 'Show fewer' : 'View all maturities'}
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="secondary-btn compact dashboard-action-btn dashboard-toggle-btn"
-                    onClick={showReinvestmentDrilldown}
-                  >
-                    View cash to reinvest
-                  </button>
-                </div>
-              </div>
-              <div className="list timeline-preview-list">
-                {visibleMaturityDashboardItems.map((deposit) => (
-                  <button
-                    key={maturityFocusMode === 'pending' ? deposit.eventId : deposit.id}
-                      type="button"
-                      className="deposit-card clickable-surface"
-                      onClick={() =>
-                        openDepositDrilldown(
-                          maturityFocusMode === 'pending' ? deposit.depositId : deposit.id,
-                          deposit.accountNumber || (maturityFocusMode === 'pending' ? deposit.depositId : deposit.id),
-                        )
-                      }
-                    >
-                    <div className="deposit-topline">
-                      <strong>{deposit.bankName}</strong>
-                      <span className={deposit.status === 'Closed' ? 'pill closed' : 'pill open'}>
-                        {deposit.status === 'Open' ? 'Active' : deposit.status || deposit.type}
-                      </span>
-                    </div>
-                    <p>
-                      {deposit.holderName} | {deposit.accountNumber || 'No account number'}
-                    </p>
-                    <p>
-                      {deposit.instrumentType || 'Maturity'}
-                    </p>
-                    <p>
-                      {maturityFocusMode === 'pending'
-                        ? `Maturity date ${formatDate(deposit.date)} | Still to reinvest ${formatCurrency(deposit.unallocatedAmount)}`
-                        : `Maturity date ${formatDate(deposit.maturityDate)}`}
-                    </p>
-                  </button>
-                ))}
-                {!showAllMaturityItems && maturityDashboardItems.length > visibleMaturityDashboardItems.length ? (
-                  <p className="timeline-preview-more">
-                    View all maturities
-                  </p>
-                ) : null}
-              </div>
-            </article>
-
-            <article id="dashboard-interest-section" className="panel">
-              <div className="section-head">
-                <div>
-                  <div className="section-title-row">
-                    <h2>
-                      {interestFocusMode === 'realizing'
-                        ? 'Interest earned to date this FY'
-                        : interestFocusMode === 'pending'
-                          ? 'Interest to reinvest'
-                          : 'Interest timeline'}
-                    </h2>
-                    {renderHelpHint(
-                      'interest-section',
-                      interestFocusMode === 'realizing'
-                        ? 'Actual gross interest earned to date in the selected FY, before TDS.'
-                        : interestFocusMode === 'pending'
-                        ? 'These are interest amounts already received but not yet fully used in new deposits.'
-                        : 'These are future interest payouts expected from deposits that pay before maturity.',
-                    )}
-                  </div>
-                  <p>
-                    {interestFocusMode === 'realizing'
-                      ? 'Maturity interest and periodic payouts earned so far in the selected FY, shown before TDS.'
-                      : interestFocusMode === 'pending'
-                      ? 'Interest cash already received and available to reinvest.'
-                      : 'Upcoming interest payouts that may be reused.'}
-                  </p>
-                </div>
-                <div className="section-head-actions">
-                {interestFocusMode !== 'realizing' && interestDashboardItems.length > DASHBOARD_PREVIEW_LIMIT ? (
-                    <button
-                      type="button"
-                      className="secondary-btn compact ghost-btn dashboard-toggle-btn"
-                      onClick={() => setShowAllInterestItems((current) => !current)}
-                    >
-                      {showAllInterestItems
-                        ? 'Show fewer'
-                        : interestFocusMode === 'realizing'
-                        ? 'View all receipts'
-                          : 'View all payouts'}
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    className={interestFocusMode !== 'all' ? 'secondary-btn compact ghost-btn dashboard-toggle-btn' : 'secondary-btn compact dashboard-action-btn dashboard-toggle-btn'}
-                    onClick={() => {
-                      if (interestFocusMode !== 'all') {
-                        setShowAllInterestItems(false)
-                        setInterestFocusMode('all')
-                        return
-                      }
-                      showReinvestmentDrilldown()
-                    }}
-                  >
-                    {interestFocusMode !== 'all' ? 'Back to timeline' : 'View cash to reinvest'}
-                  </button>
-                </div>
-              </div>
-              {interestFocusMode === 'realizing' ? (
-                realizedInterestInvestmentGroups.length > 0 ? (
-                  <div className="interest-contribution-groups">
-                    {realizedInterestInvestmentGroups.map((group) => (
-                      <section key={group.ownerName} className="interest-contribution-group">
-                        <div className="interest-contribution-group-head">
-                          <h3>{group.ownerName}</h3>
-                          <span>
-                            {group.investments.length} contributing investment{group.investments.length === 1 ? '' : 's'}
-                          </span>
-                        </div>
-                        <div className="interest-contribution-table-wrap">
-                          <table className="interest-contribution-table">
-                            <thead>
-                              <tr>
-                                <th>Bank</th>
-                                <th>Account</th>
-                                <th>Instrument</th>
-                                <th>Investment date</th>
-                                <th>Maturity date</th>
-                                <th>Principal</th>
-                                <th>Rate</th>
-                                <th>Status</th>
-                                <th>Receipts</th>
-                                <th>Receipt dates</th>
-                                <th className="interest-contribution-amount">Gross interest</th>
-                                <th className="interest-contribution-amount">TDS</th>
-                                <th className="interest-contribution-amount">Net interest</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {group.investments.map((contribution) => {
-                                const { deposit } = contribution
-                                const receiptSummary = [
-                                  contribution.maturityReceiptCount > 0
-                                    ? `${contribution.maturityReceiptCount} maturity`
-                                    : '',
-                                  contribution.periodicReceiptCount > 0
-                                    ? `${contribution.periodicReceiptCount} periodic`
-                                    : '',
-                                ]
-                                  .filter(Boolean)
-                                  .join(' + ')
-                                const receiptDates = [...contribution.receiptEvents]
-                                  .sort((left, right) => getDateSortValue(left.date) - getDateSortValue(right.date))
-                                  .map((receipt) => formatDate(receipt.date))
-
-                                return (
-                                  <tr key={deposit.id}>
-                                    <td>{deposit.bankName || '—'}</td>
-                                    <td>
-                                      {deposit.accountNumber ? (
-                                        <button
-                                          type="button"
-                                          className="interest-contribution-account-link"
-                                          onClick={() =>
-                                            openDepositDrilldown(
-                                              deposit.id,
-                                              deposit.accountNumber || deposit.id,
-                                            )
-                                          }
-                                        >
-                                          {deposit.accountNumber}
-                                        </button>
-                                      ) : (
-                                        '—'
-                                      )}
-                                    </td>
-                                    <td>
-                                      {String(deposit.instrumentType || '').trim().toLowerCase() === 'term deposit'
-                                        ? 'FD'
-                                        : deposit.instrumentType || '—'}
-                                    </td>
-                                    <td>{formatDate(deposit.investmentDate)}</td>
-                                    <td>{formatDate(deposit.maturityDate)}</td>
-                                    <td>{formatCurrency(deposit.principalAmount)}</td>
-                                    <td>{formatInterestRate(deposit.interestRate)}</td>
-                                    <td>{deposit.status || '—'}</td>
-                                    <td>{receiptSummary || '—'}</td>
-                                    <td>
-                                      <div className="interest-contribution-receipts">
-                                        {receiptDates.map((receiptDate, index) => (
-                                          <span key={`${receiptDate}-${index}`}>{receiptDate}</span>
-                                        ))}
-                                      </div>
-                                    </td>
-                                    <td className="interest-contribution-amount">
-                                      {formatWholeNumber(contribution.grossInterest)}
-                                    </td>
-                                    <td className="interest-contribution-amount">
-                                      {formatWholeNumber(contribution.tdsAmount)}
-                                    </td>
-                                    <td className="interest-contribution-amount">
-                                      {formatWholeNumber(contribution.netInterest)}
-                                    </td>
-                                  </tr>
-                                )
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-                      </section>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="lineage-empty">No gross interest receipts are scheduled in this financial year.</p>
-                )
-              ) : (
-              <div className="list timeline-preview-list">
-                {interestDashboardItems.length > 0 ? (
-                  visibleInterestDashboardItems.map((event) => (
-                    <button
-                      key={event.eventId || event.depositId}
-                      type="button"
-                      className="deposit-card clickable-surface"
-                      onClick={() => openDepositFromInterestEvent(event)}
-                    >
-                      <div className="deposit-topline">
-                        <strong>{event.bankName}</strong>
-                        <span className="pill open">
-                          {interestFocusMode === 'pending' ? 'Pending interest' : event.type}
-                        </span>
-                      </div>
-                      <p>
-                        {event.holderName} | {event.accountNumber || 'No account number'}
-                      </p>
-                      <p>
-                        {interestFocusMode === 'realizing'
-                          ? `Gross interest ${formatCurrency(event.amount)}`
-                          : formatCurrency(
-                              interestFocusMode === 'pending' ? event.pendingAmount : event.futureAmount,
-                            )}
-                      </p>
-                      <p>
-                        {interestFocusMode === 'realizing'
-                          ? `${event.instrumentType || event.sourceLabel || 'Interest'} | ${event.type === 'Maturity interest' ? 'Maturity' : 'Receipt'} ${formatDate(event.date)}`
-                          : interestFocusMode === 'pending'
-                          ? `${event.receiptCount} received interest payout${event.receiptCount === 1 ? '' : 's'} available`
-                          : `${event.receiptCount} upcoming payout${event.receiptCount === 1 ? '' : 's'} | ${formatDate(event.nextPaymentDate)}`}
-                      </p>
-                      {interestFocusMode === 'pending' && (
-                        <p className="inline-warning">
-                          Total pending for this investment {formatCurrency(event.pendingAmount)}
-                        </p>
-                      )}
-                    </button>
-                  ))
-                ) : (
-                  interestFocusMode === 'pending' ? (
-                    <div className="empty-state-card">
-                      <div className="empty-state-icon" aria-hidden="true">○</div>
-                      <p className="lineage-empty">No received interest cash is available to reinvest.</p>
-                    </div>
-                  ) : (
-                    <p className="lineage-empty">No upcoming periodic interest payouts in the schedule.</p>
-                  )
-                )}
-                {!showAllInterestItems && interestDashboardItems.length > visibleInterestDashboardItems.length ? (
-                  <p className="timeline-preview-more">
-                    {`View ${interestDashboardItems.length - visibleInterestDashboardItems.length} more payout${interestDashboardItems.length - visibleInterestDashboardItems.length === 1 ? '' : 's'}`}
-                  </p>
-                ) : null}
-              </div>
-              )}
-            </article>
-              </>
-            )}
-          </div>
-
-          <aside className="stack">
-            <div className={isMobileEditorScreen ? 'section-head editor-intro mobile-editor-intro' : 'section-head editor-intro'}>
-              <div>
-                <h2>Owners</h2>
-                <p>Active principal by holder.</p>
-              </div>
-            </div>
-            <div className="owner-grid">
-              {ownerDashboardCards.map((owner) => {
-                const isOwnerSelected =
-                  String(owner.holderName || '').trim().toLowerCase() === normalizedSelectedDashboardOwner
-
-                return (
-                <button
-                  key={owner.holderName}
-                  type="button"
-                  className={isOwnerSelected ? 'owner-card clickable-surface selected' : 'owner-card clickable-surface'}
-                  onClick={() =>
-                    setSelectedDashboardOwner((current) =>
-                      String(current || '').trim().toLowerCase() === String(owner.holderName || '').trim().toLowerCase()
-                        ? ''
-                        : owner.holderName,
-                    )
-                  }
-                >
-                  <div className="owner-card-head">
-                    <strong>{owner.holderName}</strong>
-                    {isOwnerSelected ? (
-                      <div className="owner-card-filter-state">
-                        <span className="pill open">Active filter</span>
-                        <span className="owner-card-filter-copy">
-                          {formatCurrency(owner.fyContribution)}
-                          {owner.fyContributionShare > 0
-                            ? ` • ${owner.fyContributionShare >= 10 ? owner.fyContributionShare.toFixed(0) : owner.fyContributionShare.toFixed(1)}% of FY total`
-                            : ''}
-                        </span>
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="owner-card-value">{formatCurrency(owner.principalAmount)}</div>
-                  <p className="owner-card-subtitle">
-                    <span className="owner-card-icon-label" aria-hidden="true">💰</span>
-                    <span>Principal</span>
-                  </p>
-                  <div className="owner-card-bar-block">
-                    <div className="owner-card-bar-head">
-                      <span>FY contribution</span>
-                      <strong>
-                        {owner.fyContributionShare > 0
-                          ? `${owner.fyContributionShare >= 10 ? owner.fyContributionShare.toFixed(0) : owner.fyContributionShare.toFixed(1)}%`
-                          : '0%'}
-                      </strong>
-                    </div>
-                    <div className="owner-card-bar-track" aria-hidden="true">
-                      <span
-                        className="owner-card-bar-fill"
-                        style={{ width: `${Math.max(owner.fyContributionShare, owner.fyContributionShare > 0 ? 8 : 0)}%` }}
-                      />
-                    </div>
-                  </div>
-                  <div className="owner-card-details">
-                    <p>
-                      <strong>
-                        <span className="owner-card-icon-label" aria-hidden="true">◌</span>
-                        <span>Active</span>
-                      </strong>
-                      <span>{owner.openDeposits} investments</span>
-                    </p>
-                    <p>
-                      <strong>
-                        <span className="owner-card-icon-label" aria-hidden="true">📅</span>
-                        <span>Maturity</span>
-                      </strong>
-                      <span>{formatDate(owner.nextMaturityDate)}</span>
-                    </p>
-                    <p>
-                      <strong>
-                        <span className="owner-card-icon-label" aria-hidden="true">FY</span>
-                      <span>Share of taxable interest</span>
-                      </strong>
-                      <span>
-                        {formatCurrency(owner.fyContribution)}
-                        {owner.fyContributionShare > 0
-                          ? ` • ${owner.fyContributionShare >= 10 ? owner.fyContributionShare.toFixed(0) : owner.fyContributionShare.toFixed(1)}%`
-                          : ''}
-                      </span>
-                    </p>
-                  </div>
-                  <div className="owner-card-insight">
-                    <strong>Largest investment group</strong>
-                    <span>{owner.largestSourceLabel || 'Largest investment group not available yet'}</span>
-                  </div>
-                  {isOwnerSelected ? (
-                    <span
-                      role="button"
-                      tabIndex={-1}
-                      className="owner-card-reset"
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        setSelectedDashboardOwner('')
-                      }}
-                    >
-                      Reset filter
-                    </span>
-                  ) : null}
-                </button>
-              )})}
-            </div>
-          </aside>
-        </section>
-      )}
+      {visibleActiveTab === 'dashboard' && <DashboardView {...dashboardProps} />}
 
       {visibleActiveTab === 'deposits' && (
         <div className="view-stage">

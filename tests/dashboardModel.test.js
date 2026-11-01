@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { summarizeActiveInvestmentsByIssuer } from '../src/features/dashboard/dashboardModel.js'
+import {
+  summarizeActiveInvestmentsByIssuer,
+  summarizeUpcomingInterestEvents,
+} from '../src/features/dashboard/dashboardModel.js'
 
 test('issuer summary groups active investments and adds their principal values', () => {
   const summary = summarizeActiveInvestmentsByIssuer([
@@ -48,4 +51,54 @@ test('issuer summary orders equal values alphabetically and returns no rows with
 
   assert.deepEqual(summary.map(({ issuerName }) => issuerName), ['Alpha Bank', 'Zulu Bank'])
   assert.deepEqual(summarizeActiveInvestmentsByIssuer([{ status: 'Closed', bankName: 'Old Bank', principalAmount: 1000 }]), [])
+})
+
+test('upcoming interest summary groups payouts by investment and orders by next payment date', () => {
+  const summary = summarizeUpcomingInterestEvents([
+    {
+      depositId: 'later',
+      bankName: 'South Bank',
+      holderName: 'Nisha',
+      accountNumber: 'S-2',
+      amount: 150,
+      date: '2026-11-20',
+    },
+    {
+      depositId: 'first',
+      bankName: 'North Bank',
+      holderName: 'Aarav',
+      accountNumber: 'N-1',
+      amount: 250,
+      date: '2026-11-10',
+    },
+    {
+      depositId: 'first',
+      bankName: 'North Bank',
+      holderName: 'Aarav',
+      accountNumber: 'N-1',
+      amount: 300,
+      date: '2026-11-25',
+    },
+  ])
+
+  assert.deepEqual(summary, [
+    {
+      depositId: 'first',
+      bankName: 'North Bank',
+      holderName: 'Aarav',
+      accountNumber: 'N-1',
+      futureAmount: 550,
+      receiptCount: 2,
+      nextPaymentDate: '2026-11-10',
+    },
+    {
+      depositId: 'later',
+      bankName: 'South Bank',
+      holderName: 'Nisha',
+      accountNumber: 'S-2',
+      futureAmount: 150,
+      receiptCount: 1,
+      nextPaymentDate: '2026-11-20',
+    },
+  ])
 })
