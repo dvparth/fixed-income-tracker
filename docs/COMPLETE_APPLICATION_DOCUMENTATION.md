@@ -16,6 +16,8 @@ Core capabilities:
 - manage owner/institution/branch/instrument master data,
 - provide Google sign-in and owner-scoped portfolio access,
 - support read-only portfolio sharing,
+- track monthly salary investment targets and their allocation to investments,
+- model prorated first and final interest periods for quarterly payout products,
 - import investments from Excel,
 - export admin workbooks,
 - back up and restore complete portfolio snapshots,
@@ -48,8 +50,8 @@ Shared code is imported by both frontend and backend where useful:
 - `shared/fyTaxEngine.js`: daily accrual, financial-year clipping, owner-wise tax estimates.
 - `shared/masterData.js`: master-data normalization, owner aliases, tax slab metadata.
 - `shared/investmentImport.js`: import workbook sheet and column contract.
-- `shared/systemBackup.js`: backup workbook sheet/version contract.
 - `shared/demoPortfolio.js`: public demo snapshot and default demo owner id.
+- `shared/systemBackup.js`: backup workbook sheet/version contract, including salary savings.
 
 ## 3. Data Model
 
@@ -61,6 +63,7 @@ Shared code is imported by both frontend and backend where useful:
 - `sessions`
 - `portfolioShares`
 - `auditLogs`
+- `salarySavings`
 
 ### 3.2 Investment Record
 
@@ -72,6 +75,7 @@ Important fields include:
 - ownership: `ownerUserId`, `createdByUserId`, `updatedByUserId`,
 - parties: `holderName`, `fundingSource`, `bankName`, `branchCity`,
 - instrument: `instrumentType`, `calculationFrequency`, `payoutMode`, `yearlyPayoutMonthDay`,
+- payout schedule details: `interestPayoutSchedule`, `interestPayoutOverrides`,
 - dates and tenure: `investmentDate`, `maturityDate`, `tenureYears`, `tenureMonths`, `tenureDays`,
 - amounts: `principalAmount`, `interestRate`, `maturityBeforeTax`, `maturityAfterTax`, `totalInterestEarned`, `tdsPercent`, `tdsAmount`,
 - periodic interest: `interestPayoutBeforeTds`, `interestPayoutAfterTds`,
@@ -104,6 +108,18 @@ Master data provides controlled vocabulary and canonical labels. Server update l
 - `sessions`: hashed session token, user id, expiry, last seen timestamp.
 - `portfolioShares`: owner-to-guest read-only access records.
 - `auditLogs`: actor, target, action, before/after details where useful, and metadata for high-risk operations.
+
+### 3.6 Salary Savings
+
+Monthly salary savings are stored separately from investments in the `salarySavings` collection. Each record is scoped to a portfolio owner and has a `salaryMonth` (`YYYY-MM`) and positive target `amount`. A unique owner/month index allows at most one record per month.
+
+Each record can include:
+
+- `investmentAllocations[]`: investment ID and amount links representing salary funds assigned to investments,
+- `unavailable[]`: amounts that could not be invested, with a reason,
+- optional notes and create/update actor metadata.
+
+The API derives invested, unavailable, and remaining amounts from these entries; remaining is clamped at zero. The sum of investment allocations and unavailable amounts cannot exceed the monthly target. Salary links to an investment cannot exceed that investment's principal across all salary records. These links are separate from maturity/interest cash-event allocations. Archiving or permanently deleting an investment is blocked while salary links remain.
 
 ## 4. Authentication and Authorization
 
@@ -166,33 +182,43 @@ Demo endpoints are hidden unless `SERVER_DEMO_ENABLED=true`. They use `SERVER_DE
 
 Owner scope is selected through `ownerUserId` query parameters when accessing shared or admin-relevant portfolios.
 
-### 5.6 Master Data
+Quarterly products may opt into the `prorated-boundaries-v1` interest schedule. In addition to regular quarterly events, the schedule generates a first-period payout from the investment date to the first later FY quarter end and a final-period payout from the last quarter end to maturity, when needed. Both are separate interest events; maturity proceeds remain a distinct principal event.
+
+### 5.6 Salary Savings
+
+- `GET /api/salary-savings?ownerUserId=<id>`: return owner-scoped records enriched with investment labels and derived totals. Read-only shared portfolio access is supported.
+- `POST /api/salary-savings?ownerUserId=<id>`: create a monthly target; requires portfolio write access.
+- `PUT /api/salary-savings/:id?ownerUserId=<id>`: update a target; requires portfolio write access.
+
+Writes validate the `YYYY-MM` month, positive target/line amounts, non-empty unavailability reasons, linked investment availability, and target/principal allocation limits. Creating a second record for the same owner/month returns a conflict. The interface filters records by selected April–March financial year and shows target, invested, unavailable, and available-to-invest totals.
+
+### 5.7 Master Data
 
 - `GET /api/master-data`: fetch owner-scoped master data.
 - `PUT /api/master-data`: update owner-scoped master data, validate reference safety, propagate renames, and reconcile investment labels.
 
-### 5.7 Tax Estimation
+### 5.8 Tax Estimation
 
 - `GET /api/tax-estimation?fy=<yyyy-yy>`: owner-wise FY tax estimate for authenticated portfolio data.
 
 The API maps investments into the shared FY tax engine and uses owner tax slab metadata from master data.
 
-### 5.8 Import
+### 5.9 Import
 
 - `POST /api/investment-import?dryRun=true`: parse and validate an Excel workbook without writing.
 - `POST /api/investment-import?dryRun=false`: import valid investments and augment master data transactionally.
 
 The workbook contract is defined by `shared/investmentImport.js`.
 
-### 5.9 Admin Export
+### 5.10 Admin Export
 
 - `GET /api/admin/export-data`: admin-only JSON payload used by frontend workbook export logic.
 
-### 5.10 Backup and Restore
+### 5.11 Backup and Restore
 
 - `GET /api/data-backup/export`: owner-scoped XLSX backup.
 - `POST /api/data-backup/preview`: validate a backup workbook and return preview rows/issues.
-- `POST /api/data-backup/restore`: transactionally replace owner-scoped deposits and master data from a validated backup workbook.
+- `POST /api/data-backup/restore`: transactionally replace owner-scoped deposits, salary savings, and master data from a validated backup workbook.
 
 The backup workbook contract is defined by `shared/systemBackup.js`.
 
@@ -213,6 +239,8 @@ The dashboard Owners panel groups non-deleted investments by holder and shows ea
 
 This file is currently the largest frontend coordination point and should be split opportunistically as stable boundaries appear.
 
+`src/features/dashboard/dashboardModel.js` contains the issuer aggregation used by the dashboard. It excludes investments that are not open, groups blank issuer names under "Unknown issuer", and sorts by principal descending with issuer name as a tie-breaker.
+
 ### 6.2 Deposits
 
 - `src/features/deposits/DepositsView.jsx`: grouped investment list, detail view, filters, timeline summaries, archive/delete/edit actions.
@@ -221,34 +249,40 @@ This file is currently the largest frontend coordination point and should be spl
 ### 6.3 Editor
 
 - `src/features/editor/DepositEditorView.jsx`: investment create/edit form, product behavior controls, periodic payout setup, funding allocation UI, derived summaries.
+- Salary funding is shown separately from maturity/interest cash funding. When editing an investment, the editor summarizes linked salary months and amounts, and distinguishes linked salary funds from the principal funded elsewhere.
 
-### 6.4 Master Data
+### 6.4 Salary Savings
+
+- `src/features/salary/SalarySavingsView.jsx`: monthly target create/edit form, investment links, unavailable-amount reasons, financial-year filtering, and summary/record display. Shared portfolios and demo mode are read-only.
+- `src/features/salary/salarySavingsModel.js`: April–March filtering and target/invested/unavailable/remaining and per-investment funding summaries.
+
+### 6.5 Master Data
 
 - `src/features/masters/MastersView.jsx`: owners, institutions, branches, instrument types, aliases, tax slab configuration, validation feedback.
 
-### 6.5 Tax
+### 6.6 Tax
 
 - `src/features/tax/FyTaxView.jsx`: FY selector, owner summaries, taxable interest, estimated TDS, additional liability, confidence labels.
 
-### 6.6 Import
+### 6.7 Import
 
 - `src/features/import/BulkImportPanel.jsx`: upload, dry-run preview, error display, confirmed import.
 - `src/features/import/importTemplateWorkbook.js`: import template generator.
 
-### 6.7 Backup and Settings
+### 6.8 Backup and Settings
 
 - `src/features/settings/BackupRestorePanel.jsx`: local backup download, Google Drive backup using `drive.file`, backup preview, restore confirmation.
 
-### 6.8 Sharing
+### 6.9 Sharing
 
 - `src/features/sharing/PortfolioAccessPanel.jsx`: create and revoke read-only shares.
 
-### 6.9 Admin
+### 6.10 Admin
 
 - `src/features/admin/AdminView.jsx`: privileged export UI.
 - `src/features/admin/exportWorkbook.js`: workbook generation for admin export.
 
-### 6.10 Auth
+### 6.11 Auth
 
 - `src/features/auth/AuthView.jsx`: Google sign-in UI.
 - `src/features/auth/googleIdentity.js`: Google script loading and access-token helpers for Drive backup.
@@ -273,6 +307,12 @@ Output is an estimate. It depends on correct principal, dates, rate, payout mode
 
 The dashboard deliberately separates this taxable-interest estimate from FY gross interest receipts. Taxable interest is accrual-oriented and may be spread across financial years. Gross interest receipts are schedule-oriented: they show interest before TDS in the selected FY, including full maturity interest for deposits maturing in that FY and periodic payout events dated inside that FY.
 
+### 7.1 Quarterly prorated payout schedule
+
+Quarterly payout dates follow the financial-year quarter ends (June 30, September 30, December 31, and March 31). Existing quarterly products retain their fixed per-event payout behavior unless the `prorated-boundaries-v1` schedule is selected.
+
+With that schedule enabled, the first period runs from the investment date to the first later quarter end, and the final period runs from the last quarter end to maturity if maturity does not coincide with that boundary. The calculated gross amount uses simple daily interest: principal × annual rate × elapsed days / 365, rounded to currency precision. The net suggestion uses the entered standard net-to-gross payout ratio when both are available; otherwise it applies the configured TDS percentage, defaulting to 10%. Optional `first` and `final` overrides can replace gross and/or net values with actual payout amounts. Regular full-quarter payouts continue to use the standard payout amounts, and maturity principal is still represented by the separate maturity event.
+
 ## 8. Import and Backup Contracts
 
 ### 8.1 Import Workbook
@@ -287,7 +327,7 @@ The server validates workbook shape, normalizes dates/numbers/payout modes, vali
 
 ### 8.2 Backup Workbook
 
-`shared/systemBackup.js` defines backup version `1` and these sheets:
+`shared/systemBackup.js` defines the current backup version (`2`) and these sheets:
 
 - `Metadata`
 - `Owners`
@@ -295,8 +335,11 @@ The server validates workbook shape, normalizes dates/numbers/payout modes, vali
 - `Branches`
 - `InstrumentTypes`
 - `Deposits`
+- `Salary Savings`
 
-Deposit rows carry a `Record Data` JSON column so the backup can preserve full investment payloads while still exposing readable summary columns.
+Deposit and salary savings rows carry a `Record Data` JSON column so the backup can preserve full payloads while still exposing readable summary columns, including payout overrides, funding links, and timestamps. Version 2 requires a recognized backup type/version, record counts for all sheets, and the `Salary Savings` sheet; count mismatches block restore. Version 1 backups remain supported. If a version 1 backup has no `Salary Savings` sheet, the destination's existing salary records are preserved only when their links validate against the restored investments. The preview identifies that compatibility behavior.
+
+The preview displays the backup source and restore destination. Restoring a backup from a different or unidentified source requires an explicit confirmation. Restore converts serialized record timestamps back to database dates and replaces the destination's investments, salary savings, and master data transactionally. User accounts, sessions, portfolio shares, and audit history are not included in portfolio backups.
 
 ## 9. Security Controls
 
@@ -423,9 +466,12 @@ Useful scripts:
 
 Current tests:
 
+- `tests/dashboardModel.test.js`: active investment issuer grouping, principal totals, unknown issuers, and sorting.
+- `tests/demoMode.test.js`: demo seed/data isolation, demo tax endpoint, rate limiting, and endpoint availability.
 - `tests/fyTaxEngine.test.js`: FY parsing, daily accrual, compounding, payout behavior, cross-FY reconciliation.
-- `tests/demoMode.test.js`: public demo data isolation, demo tax endpoint, demo rate limit, hidden demo endpoints when disabled.
-- `tests/securityMiddleware.test.js`: minimal health privacy, detailed health token access, production origin checks, strict schema rejection, auth rate limiting, production allowed-origin startup guard.
+- `tests/interestPayoutSchedule.test.js`: prorated first/final quarterly payouts, overrides, default TDS, editing compatibility, and legacy schedule behavior.
+- `tests/salarySavings.test.js`: financial-year filtering, summaries, investment funding links, backup validation, salary API validation, and investment dependency checks.
+- `tests/securityMiddleware.test.js`: health privacy, production origin checks, strict schema rejection, auth rate limiting, and startup guardrails.
 
 Recommended future coverage:
 

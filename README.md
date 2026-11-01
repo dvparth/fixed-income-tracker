@@ -11,6 +11,8 @@ The app is built around one practical domain problem: fixed-income investments a
 - Generate reusable cash events from maturities and periodic interest payouts.
 - Link new investments to prior maturity or interest events through allocation records.
 - View upcoming maturities, pending interest cash, FY gross interest receipts, owner summaries, grouped deposits, and reinvestment usage.
+- Review active principal grouped by bank/issuer and track monthly salary investment targets, allocations, unavailable funds, and remaining balances.
+- Model prorated first and final quarterly interest payouts, with optional gross/net overrides for actual bank credits.
 - Estimate owner-wise financial-year interest, TDS, taxable interest, and additional tax liability.
 - Manage master data for owners, institutions, branches, aliases, instrument types, and owner tax slabs.
 - Sign in with Google, use cookie-backed server sessions, and share portfolios read-only with other users.
@@ -37,10 +39,12 @@ src/
   features/
     admin/                        Admin export UI and workbook generation
     auth/                         Google Identity login helpers and auth view
+    dashboard/                    Dashboard summary calculations
     deposits/                     Deposit list/detail UI and deposit domain helpers
     editor/                       Add/edit investment form
     import/                       Excel import panel and template generation
     masters/                      Master data management UI
+    salary/                       Monthly salary savings and investment funding links
     settings/                     Backup/restore UI, including Google Drive backup
     sharing/                      Portfolio access management UI
     tax/                          Financial-year tax estimate UI
@@ -53,11 +57,14 @@ shared/
   fyTaxEngine.js                  Financial-year accrual and tax estimation logic
   investmentImport.js             Import workbook sheet/column contract
   masterData.js                   Master-data normalization and owner alias helpers
-  systemBackup.js                 Backup workbook contract
+  systemBackup.js                 Backup workbook contract, including salary savings
 
 tests/
+  dashboardModel.test.js
   demoMode.test.js
   fyTaxEngine.test.js
+  interestPayoutSchedule.test.js
+  salarySavings.test.js
   securityMiddleware.test.js
 ```
 
@@ -142,6 +149,7 @@ The backend lives in `server/index.js` and exposes these route groups:
 - Auth: `/api/auth/session`, `/api/auth/google`, `/api/auth/logout`
 - Sharing: `/api/shares`
 - Investments: `/api/deposits`, `/api/deposits/:id`, `/api/deposits/:id/archive`
+- Salary savings: `/api/salary-savings`, `/api/salary-savings/:id`
 - Master data: `/api/master-data`
 - Tax: `/api/tax-estimation`
 - Import: `/api/investment-import`
@@ -158,11 +166,14 @@ Most portfolio routes are owner-scoped. Shared portfolios are read-only for gues
 - Master data is owner-scoped and canonicalizes owner, institution, branch, and instrument labels.
 - Owner aliases and owner tax slab rates feed search and tax estimation.
 - Periodic payout products can generate interest events before maturity.
+- Quarterly payouts can opt into prorated first and final interest periods; optional overrides capture actual gross/net amounts while regular quarterly payouts retain the configured payout amount.
+- Salary savings records are tracked per month and financial year, with separate invested, unavailable, and remaining totals. Salary allocations link to investments and are summarized when editing an investment.
+- Version 2 backups validate sheet counts and include salary savings; version 1 backups without that sheet preserve existing salary records only when their links remain valid. Backups cover portfolio data, not users, sessions, shares, or audit history.
 - Dashboard FY gross interest receipts are separate from taxable interest estimates: the receipt view shows interest scheduled in the selected FY before TDS, including maturity interest that may have accrued across earlier FYs.
 - Archive prevents removing investments still used as funding sources.
-- Hard delete is admin-only and cleans dependent funding links.
+- Hard delete is admin-only and cleans dependent funding links; investments with salary savings links cannot be archived or permanently deleted until those links are removed.
 - Public demo endpoints are disabled unless `SERVER_DEMO_ENABLED=true`.
-- Backup restore replaces owner-scoped deposits and master data after workbook validation.
+- Backup restore replaces owner-scoped deposits, salary savings, and master data after workbook validation.
 
 ## Security Notes
 
@@ -179,12 +190,12 @@ Most portfolio routes are owner-scoped. Shared portfolios are read-only for gues
 
 Current tests cover:
 
+- issuer dashboard summaries and sorting,
 - financial-year interest accrual and tax estimation behavior,
+- legacy and prorated interest payout schedules and overrides,
+- salary savings calculations, API validation, and backup validation,
 - public demo isolation and demo rate limiting,
-- health endpoint privacy,
-- production origin/CSRF checks,
-- strict schema rejection of unexpected auth fields,
-- production startup guardrails.
+- health endpoint privacy, production origin/CSRF checks, strict schema rejection, and startup guardrails.
 
 Run them with:
 

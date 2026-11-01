@@ -86,11 +86,20 @@ export default function BackupRestorePanel({
   const [isPreviewing, setIsPreviewing] = useState(false)
   const [isRestoring, setIsRestoring] = useState(false)
   const [confirmReplace, setConfirmReplace] = useState(false)
+  const [confirmSourceIdentity, setConfirmSourceIdentity] = useState(false)
   const [isRestoreConfirmOpen, setIsRestoreConfirmOpen] = useState(false)
   const [backupDestination, setBackupDestination] = useState(DEFAULT_BACKUP_DESTINATION)
   const [driveLink, setDriveLink] = useState('')
 
-  const canRestore = Boolean(selectedFile && previewResult && !previewResult.hasErrors && confirmReplace && !isReadOnly)
+  const needsSourceConfirmation = previewResult?.sourcePortfolioStatus !== 'match'
+  const canRestore = Boolean(
+    selectedFile &&
+    previewResult &&
+    !previewResult.hasErrors &&
+    confirmReplace &&
+    (!needsSourceConfirmation || confirmSourceIdentity) &&
+    !isReadOnly,
+  )
   const previewSummary = previewResult?.summary || null
   const previewRows = useMemo(() => previewResult?.previewRows || [], [previewResult])
   const canUseDrive = Boolean(googleClientId)
@@ -293,7 +302,7 @@ export default function BackupRestorePanel({
     }
   }
 
-  const uploadFile = async (path) => {
+  const uploadFile = async (path, fields = {}) => {
     if (!selectedFile) {
       setFeedback({
         type: 'error',
@@ -304,6 +313,7 @@ export default function BackupRestorePanel({
 
     const formData = new FormData()
     formData.append('file', selectedFile)
+    Object.entries(fields).forEach(([key, value]) => formData.append(key, value))
 
     return requestJson(buildOwnerScopedPath(path, ownerUserId), {
       method: 'POST',
@@ -316,6 +326,7 @@ export default function BackupRestorePanel({
       setIsPreviewing(true)
       setPreviewResult(null)
       setConfirmReplace(false)
+      setConfirmSourceIdentity(false)
       setFeedback(null)
       const result = await uploadFile('/api/data-backup/preview')
       setPreviewResult(result)
@@ -345,7 +356,9 @@ export default function BackupRestorePanel({
       setFeedback(null)
       const preRestoreBackupFile = await fetchBackupFile('yieldflow-pre-restore-backup.xlsx')
       triggerDownload(preRestoreBackupFile.blob, preRestoreBackupFile.filename)
-      const result = await uploadFile('/api/data-backup/restore')
+      const result = await uploadFile('/api/data-backup/restore', {
+        confirmSourceIdentity: String(!needsSourceConfirmation || confirmSourceIdentity),
+      })
       setFeedback({
         type: 'success',
         message: 'Backup restored successfully. A backup of your previous data was downloaded first.',
@@ -440,6 +453,7 @@ export default function BackupRestorePanel({
                 setSelectedFile(event.target.files?.[0] || null)
                 setPreviewResult(null)
                 setConfirmReplace(false)
+                setConfirmSourceIdentity(false)
                 setFeedback(null)
               }}
               disabled={isReadOnly}
@@ -503,7 +517,48 @@ export default function BackupRestorePanel({
               <span>Branches: {previewSummary?.branchCount || 0}</span>
               <span>Instrument types: {previewSummary?.instrumentTypeCount || 0}</span>
               <span>Archived investments: {previewSummary?.archivedInvestmentCount || 0}</span>
+              <span>Salary savings: {previewSummary?.salarySavingsCount || 0}</span>
+              {previewSummary?.preservedExistingSalarySavingsCount > 0 && (
+                <span>Preserved from this portfolio: {previewSummary.preservedExistingSalarySavingsCount}</span>
+              )}
             </div>
+
+            <div className="backup-preview-metrics">
+              <span>
+                Backup source: {previewResult.sourcePortfolio?.label || 'Unknown portfolio'}
+                {previewResult.sourcePortfolio?.ownerUserId
+                  ? ` (${previewResult.sourcePortfolio.ownerUserId})`
+                  : ''}
+              </span>
+              <span>Restore destination: {previewResult.destinationPortfolio?.label || portfolioLabel}</span>
+            </div>
+
+            {previewResult.warnings?.map((warning) => (
+              <div key={warning} className="backup-warning-card">
+                <strong>Compatibility note</strong>
+                <p>{warning}</p>
+              </div>
+            ))}
+
+            {needsSourceConfirmation && (
+              <div className="backup-warning-card">
+                <strong>
+                  {previewResult.sourcePortfolioStatus === 'different'
+                    ? 'This backup belongs to a different portfolio.'
+                    : 'The backup source portfolio could not be identified.'}
+                </strong>
+                <p>Restoring will replace data in the selected destination portfolio.</p>
+                <label className="checkbox-field">
+                  <input
+                    type="checkbox"
+                    checked={confirmSourceIdentity}
+                    onChange={(event) => setConfirmSourceIdentity(event.target.checked)}
+                    disabled={previewResult.hasErrors || isReadOnly}
+                  />
+                  <span>I confirm this is the portfolio I intend to restore.</span>
+                </label>
+              </div>
+            )}
 
             {previewResult.errors.length > 0 && (
               <div className="import-error-list">
@@ -563,16 +618,20 @@ export default function BackupRestorePanel({
             </div>
 
             <div className="backup-warning-card">
-              <strong>This will replace all your existing data.</strong>
+              <strong>This will replace portfolio data.</strong>
               <p>
-                Deposits and reference data for {portfolioLabel} will be overwritten. A backup of
-                your current data will be downloaded automatically before restore starts.
+                Investments, salary savings, and reference data for {portfolioLabel} will be
+                overwritten. A backup of your current data will be downloaded automatically before
+                restore starts.
               </p>
               <label className="checkbox-field">
                 <input
                   type="checkbox"
                   checked={confirmReplace}
-                  onChange={(event) => setConfirmReplace(event.target.checked)}
+                  onChange={(event) => {
+                    setConfirmReplace(event.target.checked)
+                    if (!event.target.checked) setConfirmSourceIdentity(false)
+                  }}
                   disabled={previewResult.hasErrors || isReadOnly}
                 />
                 <span>I understand this will replace the current portfolio data.</span>
@@ -616,7 +675,7 @@ export default function BackupRestorePanel({
             <div className="section-head">
               <div>
                 <h2 id="restore-confirm-title">Restore Data</h2>
-                <p>This will replace all your existing data with the selected backup.</p>
+                <p>This will replace portfolio data with the selected backup.</p>
               </div>
             </div>
             <div className="backup-confirm-modal-copy">

@@ -12,7 +12,14 @@ import { DEFAULT_DEMO_OWNER_ID, DEMO_PORTFOLIO_LABEL } from '../shared/demoPortf
 import { generateOwnerWiseFYTaxSummary, parseFinancialYearLabel } from '../shared/fyTaxEngine.js'
 import { INVESTMENT_IMPORT_REQUIRED_COLUMNS, INVESTMENT_IMPORT_SHEET_NAME } from '../shared/investmentImport.js'
 import { emptyMasterData, normalizeMasterData } from '../shared/masterData.js'
-import { BACKUP_DEPOSIT_JSON_COLUMN, BACKUP_SHEETS, BACKUP_WORKBOOK_VERSION } from '../shared/systemBackup.js'
+import {
+  BACKUP_DEPOSIT_JSON_COLUMN,
+  BACKUP_SALARY_SAVINGS_JSON_COLUMN,
+  BACKUP_SHEETS,
+  BACKUP_TYPE,
+  BACKUP_WORKBOOK_VERSION,
+  SUPPORTED_BACKUP_WORKBOOK_VERSIONS,
+} from '../shared/systemBackup.js'
 
 dotenv.config()
 
@@ -309,6 +316,17 @@ const salarySavingBodySchema = z.object({
   investmentAllocations: z.array(salaryInvestmentAllocationSchema).optional(),
   notes: optionalTextField,
 }).strict()
+const backupTimestampField = z.union([z.string(), z.date()]).optional()
+const salarySavingBackupSchema = salarySavingBodySchema.extend({
+  id: z.string().trim().min(1).max(240),
+  ownerUserId: optionalTextField,
+  createdByUserId: optionalTextField,
+  updatedByUserId: optionalTextField,
+  createdAt: backupTimestampField,
+  updatedAt: backupTimestampField,
+  _id: z.any().optional(),
+  __v: z.any().optional(),
+}).strict()
 const cashSettlementSchema = z.object({
   eventId: z.string().trim().min(1).max(260),
   amount: z.number().positive(),
@@ -357,8 +375,8 @@ const depositWriteBodySchema = z.object({
   ownerUserId: optionalTextField,
   createdByUserId: optionalTextField,
   updatedByUserId: optionalTextField,
-  createdAt: optionalTextField,
-  updatedAt: optionalTextField,
+  createdAt: backupTimestampField,
+  updatedAt: backupTimestampField,
   _id: z.any().optional(),
   __v: z.any().optional(),
 }).strict()
@@ -1088,7 +1106,7 @@ const buildBackupWorkbookBuffer = ({ portfolioLabel, ownerUserId, deposits, mast
   })
 
   const metadataRows = [
-    { Field: 'Backup type', Value: 'YieldFlow full backup' },
+    { Field: 'Backup type', Value: BACKUP_TYPE },
     { Field: 'Workbook version', Value: BACKUP_WORKBOOK_VERSION },
     { Field: 'Exported at', Value: exportedAt },
     { Field: 'Portfolio label', Value: portfolioLabel },
@@ -1097,6 +1115,13 @@ const buildBackupWorkbookBuffer = ({ portfolioLabel, ownerUserId, deposits, mast
     { Field: 'Salary savings count', Value: salarySavings.length },
     { Field: 'Owner count', Value: (normalizedMasterData.owners || []).length },
     { Field: 'Institution count', Value: (normalizedMasterData.institutions || []).length },
+    {
+      Field: 'Branch count',
+      Value: (normalizedMasterData.institutions || []).reduce(
+        (sum, institution) => sum + (institution.branches || []).length,
+        0,
+      ),
+    },
     { Field: 'Instrument type count', Value: (normalizedMasterData.instrumentTypes || []).length },
   ]
 
@@ -1176,7 +1201,17 @@ const buildBackupWorkbookBuffer = ({ portfolioLabel, ownerUserId, deposits, mast
   )
   XLSX.utils.book_append_sheet(
     workbook,
-    XLSX.utils.json_to_sheet(salarySavings.map((saving) => ({ 'Salary savings ID': saving.id, 'Salary month': saving.salaryMonth, Amount: saving.amount, 'Record Data': JSON.stringify(saving) })), { skipHeader: false }),
+    XLSX.utils.json_to_sheet(salarySavings.map((saving) => {
+      const snapshot = { ...saving }
+      delete snapshot._id
+      delete snapshot.__v
+      return {
+        'Salary savings ID': saving.id,
+        'Salary month': saving.salaryMonth,
+        Amount: saving.amount,
+        [BACKUP_SALARY_SAVINGS_JSON_COLUMN]: JSON.stringify(snapshot),
+      }
+    }), { skipHeader: false }),
     BACKUP_SHEETS.salarySavings,
   )
 
@@ -1213,7 +1248,8 @@ const parseBackupWorkbook = (buffer) => {
   const branchRows = getBackupSheetRows(workbook, BACKUP_SHEETS.branches)
   const instrumentRows = getBackupSheetRows(workbook, BACKUP_SHEETS.instrumentTypes)
   const depositRows = getBackupSheetRows(workbook, BACKUP_SHEETS.deposits)
-  const salaryRows = workbook.Sheets[BACKUP_SHEETS.salarySavings]
+  const salarySavingsSheetPresent = Boolean(workbook.Sheets[BACKUP_SHEETS.salarySavings])
+  const salaryRows = salarySavingsSheetPresent
     ? XLSX.utils.sheet_to_json(workbook.Sheets[BACKUP_SHEETS.salarySavings], { defval: '', raw: false })
     : []
 
@@ -1292,7 +1328,7 @@ const parseBackupWorkbook = (buffer) => {
     }
   })
   const salarySavings = salaryRows.map((row, index) => {
-    const payloadText = String(row['Record Data'] || '').trim()
+    const payloadText = String(row[BACKUP_SALARY_SAVINGS_JSON_COLUMN] || '').trim()
     if (!payloadText) {
       return { rowNumber: index + 2, parseError: 'Missing full salary savings record data.', payload: null }
     }
@@ -1312,13 +1348,43 @@ const parseBackupWorkbook = (buffer) => {
     masterData,
     deposits,
     salarySavings,
+    salarySavingsSheetPresent,
+    recordCounts: {
+      investmentCount: depositRows.length,
+      salarySavingsCount: salaryRows.length,
+      ownerCount: ownerRows.length,
+      institutionCount: institutionRows.length,
+      branchCount: branchRows.length,
+      instrumentTypeCount: instrumentRows.length,
+    },
   }
 }
 
-const isValidBackupDate = (value) =>
-  /^\d{4}-\d{2}-\d{2}$/.test(String(value || '').trim())
+const isValidBackupDate = (value) => {
+  const date = String(value || '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return false
+  }
+  const parsed = new Date(`${date}T00:00:00.000Z`)
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date
+}
 
-const validateBackupSnapshot = ({ metadataRows, masterData, deposits, salarySavings = [] }) => {
+const isValidBackupTimestamp = (value) =>
+  value === '' ||
+  value === null ||
+  value === undefined ||
+  (value instanceof Date && Number.isFinite(value.getTime())) ||
+  (typeof value === 'string' && Number.isFinite(new Date(value).getTime()))
+
+const validateBackupSnapshot = ({
+  metadataRows = [],
+  masterData,
+  deposits,
+  salarySavings = [],
+  salarySavingsSheetPresent = true,
+  recordCounts,
+  existingSalarySavings = [],
+}) => {
   const errors = []
   const rowErrors = []
   const ownerNames = new Set((masterData.owners || []).map((owner) => normalizeText(owner.name)).filter(Boolean))
@@ -1335,12 +1401,67 @@ const validateBackupSnapshot = ({ metadataRows, masterData, deposits, salarySavi
     ]),
   )
 
-  const versionRow = metadataRows.find(
-    (row) => normalizeText(row.Field) === normalizeText('Workbook version'),
-  )
+  const metadata = new Map()
+  metadataRows.forEach((row) => {
+    const field = normalizeText(row.Field)
+    if (metadata.has(field)) {
+      errors.push(`Backup metadata contains duplicate "${String(row.Field || '').trim()}" entries.`)
+    }
+    metadata.set(field, String(row.Value || '').trim())
+  })
+  const backupType = metadata.get(normalizeText('Backup type')) || ''
+  const backupVersion = metadata.get(normalizeText('Workbook version')) || ''
+  const metadataValue = (field) => metadata.get(normalizeText(field))
+  const sourcePortfolio = {
+    label: metadataValue('Portfolio label') || '',
+    ownerUserId: metadataValue('Portfolio owner user ID') || '',
+  }
+  const isSupportedVersion = SUPPORTED_BACKUP_WORKBOOK_VERSIONS.includes(backupVersion)
 
-  if (versionRow && String(versionRow.Value || '').trim() !== BACKUP_WORKBOOK_VERSION) {
-    errors.push(`Backup version ${String(versionRow.Value || '').trim()} is not supported.`)
+  if (normalizeText(backupType) !== normalizeText(BACKUP_TYPE)) {
+    errors.push('Backup type is missing or not recognized.')
+  }
+  if (!backupVersion) {
+    errors.push('Backup workbook version is missing.')
+  } else if (!isSupportedVersion) {
+    errors.push(`Backup version ${backupVersion} is not supported.`)
+  }
+  if (isSupportedVersion && backupVersion === BACKUP_WORKBOOK_VERSION && !salarySavingsSheetPresent) {
+    errors.push('Version 2 backups must contain a Salary Savings sheet.')
+  }
+
+  const countFields = [
+    ['investmentCount', 'Investment count'],
+    ['ownerCount', 'Owner count'],
+    ['institutionCount', 'Institution count'],
+    ['branchCount', 'Branch count'],
+    ['instrumentTypeCount', 'Instrument type count'],
+    ['salarySavingsCount', 'Salary savings count'],
+  ]
+  const requiredCountFields = backupVersion === BACKUP_WORKBOOK_VERSION
+    ? countFields
+    : countFields.filter(([key]) => key !== 'salarySavingsCount' && key !== 'branchCount')
+  if (isSupportedVersion) {
+    requiredCountFields.forEach(([, field]) => {
+      if (metadataValue(field) === undefined) {
+        errors.push(`Backup metadata is missing the "${field}" value.`)
+      }
+    })
+    countFields.forEach(([key, field]) => {
+      const value = metadataValue(field)
+      if (value === undefined) {
+        return
+      }
+      const expected = Number(value)
+      const actual = Number(recordCounts?.[key])
+      if (!Number.isInteger(expected) || expected < 0) {
+        errors.push(`Backup metadata "${field}" must be a non-negative integer.`)
+      } else if (!Number.isInteger(actual) || actual < 0) {
+        errors.push(`Could not verify the "${field}" value against the workbook sheets.`)
+      } else if (Number.isInteger(actual) && actual !== expected) {
+        errors.push(`Backup metadata "${field}" is ${expected}, but the workbook contains ${actual}.`)
+      }
+    })
   }
 
   const parsedDeposits = []
@@ -1365,6 +1486,20 @@ const validateBackupSnapshot = ({ metadataRows, masterData, deposits, salarySavi
     const principalAmount = Number(payload?.principalAmount || entry.row?.Principal || 0)
     const allocations = Array.isArray(payload?.allocations) ? payload.allocations : []
     const cashSettlements = Array.isArray(payload?.cashSettlements) ? payload.cashSettlements : []
+
+    if (payload) {
+      const parsedPayload = depositWriteBodySchema.safeParse(payload)
+      if (!parsedPayload.success) {
+        payloadErrors.push(
+          `Investment record contains unsupported or invalid fields: ${parsedPayload.error.issues
+            .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
+            .join('; ')}`,
+        )
+      }
+      if (!isValidBackupTimestamp(payload.createdAt) || !isValidBackupTimestamp(payload.updatedAt)) {
+        payloadErrors.push('Investment timestamps must be valid date-time values.')
+      }
+    }
 
     if (!depositId) {
       payloadErrors.push('Investment ID is missing.')
@@ -1483,7 +1618,12 @@ const validateBackupSnapshot = ({ metadataRows, masterData, deposits, salarySavi
     }
   })
 
-  const knownDepositIds = new Set(parsedDeposits.map((deposit) => deposit.investment.id).filter(Boolean))
+  const knownDepositIds = new Set(
+    parsedDeposits
+      .filter((deposit) => deposit.errors.length === 0 && deposit.payload)
+      .map((deposit) => deposit.investment.id)
+      .filter(Boolean),
+  )
 
   parsedDeposits.forEach((deposit) => {
     if (!deposit.payload) {
@@ -1532,12 +1672,19 @@ const validateBackupSnapshot = ({ metadataRows, masterData, deposits, salarySavi
       .filter((entry) => entry.errors.length === 0 && entry.payload)
       .map((entry) => [entry.payload.id, entry.payload]),
   )
+  const salaryEntries = salarySavingsSheetPresent
+    ? salarySavings
+    : existingSalarySavings.map((payload, index) => ({ rowNumber: index + 2, payload }))
+  const preservedExistingSalarySavingsCount = salarySavingsSheetPresent ? 0 : salaryEntries.length
+  const warnings = !salarySavingsSheetPresent && backupVersion === '1'
+    ? ['This version 1 backup has no Salary Savings sheet. Existing salary savings will be preserved and validated against the restored investments.']
+    : []
   const validatedSalarySavings = []
   const salarySavingsErrors = []
   const salarySavingIds = new Set()
   const salaryMonths = new Set()
 
-  salarySavings.forEach((entry, index) => {
+  salaryEntries.forEach((entry, index) => {
     const rowNumber = Number(entry?.rowNumber) || index + 2
     const payload = entry && Object.prototype.hasOwnProperty.call(entry, 'payload')
       ? entry.payload
@@ -1549,6 +1696,15 @@ const validateBackupSnapshot = ({ metadataRows, masterData, deposits, salarySavi
     }
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
       rowMessages.push('Salary savings record data must be a JSON object.')
+    } else {
+      const parsedPayload = salarySavingBackupSchema.safeParse(payload)
+      if (!parsedPayload.success) {
+        rowMessages.push(
+          `Salary savings record contains unsupported or invalid fields: ${parsedPayload.error.issues
+            .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
+            .join('; ')}`,
+        )
+      }
     }
 
     const id = String(payload?.id || '').trim()
@@ -1575,6 +1731,9 @@ const validateBackupSnapshot = ({ metadataRows, masterData, deposits, salarySavi
 
     if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
       rowMessages.push('Salary target must be a positive number.')
+    }
+    if (!isValidBackupTimestamp(payload?.createdAt) || !isValidBackupTimestamp(payload?.updatedAt)) {
+      rowMessages.push('Salary savings timestamps must be valid date-time values.')
     }
     if (!Array.isArray(unavailable)) {
       rowMessages.push('Unavailable amounts must be a list.')
@@ -1644,6 +1803,8 @@ const validateBackupSnapshot = ({ metadataRows, masterData, deposits, salarySavi
     hasErrors: errors.length > 0 || rowErrors.length > 0,
     errors,
     rowErrors,
+    warnings,
+    sourcePortfolio,
     parsedRowCount: deposits.length,
     validRowCount: parsedDeposits.filter((entry) => entry.errors.length === 0).length,
     previewRows: parsedDeposits.slice(0, BACKUP_PREVIEW_ROW_LIMIT).map((entry) => ({
@@ -1664,6 +1825,7 @@ const validateBackupSnapshot = ({ metadataRows, masterData, deposits, salarySavi
         (entry) => String(entry.payload?.status || '').trim().toLowerCase() === 'closed' || entry.payload?.isDeleted,
       ).length,
       salarySavingsCount: validatedSalarySavings.length,
+      preservedExistingSalarySavingsCount,
     },
     snapshot: {
       masterData,
@@ -1671,6 +1833,13 @@ const validateBackupSnapshot = ({ metadataRows, masterData, deposits, salarySavi
       salarySavings: validatedSalarySavings,
     },
   }
+}
+
+const getBackupSourceStatus = (sourcePortfolio, destinationOwnerUserId) => {
+  if (!sourcePortfolio?.ownerUserId) {
+    return 'unknown'
+  }
+  return sourcePortfolio.ownerUserId === destinationOwnerUserId ? 'match' : 'different'
 }
 
 const buildMasterRenameMap = (previousItems = [], nextItems = []) =>
@@ -3802,9 +3971,21 @@ app.post(
 
     try {
       const parsed = parseBackupWorkbook(request.file.buffer)
-      const validation = validateBackupSnapshot(parsed)
+      const existingSalarySavings = parsed.salarySavingsSheetPresent
+        ? []
+        : await SalarySaving.find({ ownerUserId: request.portfolioContext.ownerUserId }).lean()
+      const validation = validateBackupSnapshot({ ...parsed, existingSalarySavings })
+      const destinationPortfolio = {
+        label: request.portfolioContext.ownerDisplayName || 'portfolio',
+        ownerUserId: request.portfolioContext.ownerUserId,
+      }
       response.json({
         fileName: request.file.originalname,
+        destinationPortfolio,
+        sourcePortfolioStatus: getBackupSourceStatus(
+          validation.sourcePortfolio,
+          destinationPortfolio.ownerUserId,
+        ),
         ...validation,
       })
     } catch (error) {
@@ -3835,11 +4016,32 @@ app.post(
     }
 
     let validation
+    let existingSalarySavings
     try {
-      validation = validateBackupSnapshot(parseBackupWorkbook(request.file.buffer))
+      const parsed = parseBackupWorkbook(request.file.buffer)
+      existingSalarySavings = await SalarySaving.find({
+        ownerUserId: request.portfolioContext.ownerUserId,
+      }).lean()
+      validation = validateBackupSnapshot({
+        ...parsed,
+        existingSalarySavings: parsed.salarySavingsSheetPresent ? [] : existingSalarySavings,
+      })
     } catch (error) {
       response.status(400).json({
         message: error.message,
+      })
+      return
+    }
+
+    const sourcePortfolioStatus = getBackupSourceStatus(
+      validation.sourcePortfolio,
+      request.portfolioContext.ownerUserId,
+    )
+    if (sourcePortfolioStatus !== 'match' && request.body.confirmSourceIdentity !== 'true') {
+      response.status(409).json({
+        message: 'Confirm that you intend to restore this backup into a different or unidentified portfolio.',
+        sourcePortfolio: validation.sourcePortfolio,
+        sourcePortfolioStatus,
       })
       return
     }
@@ -3855,7 +4057,6 @@ app.post(
     const currentState = await Promise.all([
       Deposit.find({ ownerUserId: request.portfolioContext.ownerUserId }).lean(),
       getMasterData(request.portfolioContext.ownerUserId, { createIfMissing: true }),
-      SalarySaving.find({ ownerUserId: request.portfolioContext.ownerUserId }).lean(),
     ])
 
     const previousDeposits = currentState[0].map(normalizeDepositDoc)
@@ -3870,6 +4071,8 @@ app.post(
 
       const restoredDeposits = validation.snapshot.deposits.map((deposit) => {
         const snapshot = sanitizeRestoredDepositPayload(deposit)
+        if (snapshot.createdAt) snapshot.createdAt = new Date(snapshot.createdAt)
+        if (snapshot.updatedAt) snapshot.updatedAt = new Date(snapshot.updatedAt)
 
         return {
           ...snapshot,
@@ -3882,13 +4085,19 @@ app.post(
       if (restoredDeposits.length > 0) {
         await Deposit.collection.insertMany(restoredDeposits, { session })
       }
-      const restoredSalarySavings = (validation.snapshot.salarySavings || []).map((saving) => ({
-        ...saving,
-        _id: undefined,
-        ownerUserId: request.portfolioContext.ownerUserId,
-        createdByUserId: String(saving.createdByUserId || request.sessionUser.id),
-        updatedByUserId: String(saving.updatedByUserId || request.sessionUser.id),
-      }))
+      const restoredSalarySavings = (validation.snapshot.salarySavings || []).map((saving) => {
+        const snapshot = { ...saving }
+        delete snapshot._id
+        delete snapshot.__v
+        if (snapshot.createdAt) snapshot.createdAt = new Date(snapshot.createdAt)
+        if (snapshot.updatedAt) snapshot.updatedAt = new Date(snapshot.updatedAt)
+        return {
+          ...snapshot,
+          ownerUserId: request.portfolioContext.ownerUserId,
+          createdByUserId: String(snapshot.createdByUserId || request.sessionUser.id),
+          updatedByUserId: String(snapshot.updatedByUserId || request.sessionUser.id),
+        }
+      })
       if (restoredSalarySavings.length > 0) {
         await SalarySaving.collection.insertMany(restoredSalarySavings, { session })
       }
@@ -3915,10 +4124,12 @@ app.post(
         targetOwnerUserId: request.portfolioContext.ownerUserId,
         before: {
           depositCount: previousDeposits.length,
+          salarySavingsCount: existingSalarySavings.length,
           masterData: previousMasterData,
         },
         after: {
           depositCount: restoredDeposits.length,
+          salarySavingsCount: restoredSalarySavings.length,
           masterData: validation.snapshot.masterData,
         },
         metadata: {
@@ -3929,6 +4140,11 @@ app.post(
       })
 
       await session.commitTransaction()
+    } catch (error) {
+      if (session.inTransaction()) {
+        await session.abortTransaction()
+      }
+      throw error
     } finally {
       await session.endSession()
     }
@@ -3990,5 +4206,5 @@ if (process.env.NODE_ENV !== 'test' && process.env.SERVER_DISABLE_START !== 'tru
   })
 }
 
-export { parseBackupWorkbook, validateBackupSnapshot }
+export { buildBackupWorkbookBuffer, parseBackupWorkbook, validateBackupSnapshot }
 export default app
