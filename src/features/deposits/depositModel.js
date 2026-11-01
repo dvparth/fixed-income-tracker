@@ -10,6 +10,7 @@ export const PRORATED_PAYOUT_SCHEDULE = 'prorated-boundaries-v1'
 
 export const emptyForm = {
   srNo: '',
+  parentInvestmentId: '',
   bankName: '',
   branchCity: '',
   holderName: '',
@@ -566,6 +567,7 @@ export const normalizeDeposit = (formValues, existingId, fallbackSrNo, existingD
 
   return hydrateDeposit({
     id: existingId || createRecordId(),
+    parentInvestmentId: String(formValues.parentInvestmentId || '').trim(),
     srNo: parseNumber(formValues.srNo) || fallbackSrNo,
     bankName: formValues.bankName.trim(),
     branchCity: formValues.branchCity.trim(),

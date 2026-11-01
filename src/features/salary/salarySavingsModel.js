@@ -7,19 +7,51 @@ export const filterSavingsByFinancialYear = (savings, financialYear) => {
   })
 }
 
-export const summarizeSavings = (savings) => savings.reduce((totals, item) => ({
-  savings: totals.savings + Number(item.amount || 0),
-  invested: totals.invested + Number(item.investedAmount || 0),
-  unavailable: totals.unavailable + Number(item.unavailableAmount || 0),
-  remaining: totals.remaining + Number(item.remainingAmount || 0),
-}), { savings: 0, invested: 0, unavailable: 0, remaining: 0 })
+export const splitInvestmentAllocations = (saving, investments = []) => {
+  const canResolveInvestments = investments.length > 0
+  const investmentById = new Map(investments.map((investment) => [investment.id, investment]))
+  const current = []
+  const history = []
 
-export const summarizeInvestmentSalaryFunding = (savings, editingId, principalAmount) => {
+  ;(saving.investmentAllocations || []).forEach((allocation) => {
+    const investment = investmentById.get(allocation.investmentId)
+    const isHistorical = Boolean(
+      allocation.isHistorical ||
+      (canResolveInvestments && (!investment || String(investment.status || '').toLowerCase() === 'closed')),
+    )
+    const enrichedAllocation = { ...allocation, isHistorical }
+    ;(isHistorical ? history : current).push(enrichedAllocation)
+  })
+
+  return { current, history }
+}
+
+export const summarizeSavings = (savings, investments = []) => savings.reduce((totals, item) => {
+  const unavailable = Number(item.unavailableAmount ??
+    (item.unavailable || []).reduce((sum, line) => sum + Number(line.amount || 0), 0))
+  const hasAllocationDetails = Array.isArray(item.investmentAllocations)
+  const invested = hasAllocationDetails
+    ? splitInvestmentAllocations(item, investments).current.reduce(
+        (sum, line) => sum + Number(line.amount || 0),
+        0,
+      )
+    : Number(item.investedAmount || 0)
+  const remaining = Math.max(Number(item.amount || 0) - unavailable - invested, 0)
+
+  return {
+    savings: totals.savings + Number(item.amount || 0),
+    invested: totals.invested + invested,
+    unavailable: totals.unavailable + unavailable,
+    remaining: totals.remaining + remaining,
+  }
+}, { savings: 0, invested: 0, unavailable: 0, remaining: 0 })
+
+export const summarizeInvestmentSalaryFunding = (savings, editingId, principalAmount, investments = []) => {
   const amount = Number(principalAmount || 0)
   if (!editingId) return { total: 0, outsideAmount: amount, links: [] }
 
   const links = savings.flatMap((saving) =>
-    (saving.investmentAllocations || [])
+    splitInvestmentAllocations(saving, investments).current
       .filter((link) => link.investmentId === editingId)
       .map((link) => ({ salaryMonth: saving.salaryMonth, amount: Number(link.amount || 0) })),
   )

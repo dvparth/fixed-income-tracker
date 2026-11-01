@@ -119,7 +119,7 @@ Each record can include:
 - `unavailable[]`: amounts that could not be invested, with a reason,
 - optional notes and create/update actor metadata.
 
-The API derives invested, unavailable, and remaining amounts from these entries; remaining is clamped at zero. The sum of investment allocations and unavailable amounts cannot exceed the monthly target. Salary links to an investment cannot exceed that investment's principal across all salary records. These links are separate from maturity/interest cash-event allocations. Archiving or permanently deleting an investment is blocked while salary links remain.
+The API derives current invested, historical, unavailable, and to-be-invested amounts from these entries. Links to closed investments remain as history and do not count toward current invested totals or the monthly target. A renewal creates a successor investment with a `parentInvestmentId`; the renewal dialog lets users assign any portion of each parent-linked salary source to that successor. The renewal, parent closure, and new salary links are committed in one transaction. Any unassigned portion returns to the salary month's to-be-invested balance. Salary links are separate from maturity/interest cash-event allocations. Archiving or permanently deleting an investment is blocked while salary links remain.
 
 ## 4. Authentication and Authorization
 
@@ -177,6 +177,7 @@ Demo endpoints are hidden unless `SERVER_DEMO_ENABLED=true`. They use `SERVER_DE
 - `GET /api/deposits`: list owner-scoped investments, canonicalized against master data.
 - `POST /api/deposits`: create investment.
 - `PUT /api/deposits/:id`: update investment.
+- `POST /api/deposits/:id/renew`: close an investment and atomically create its successor, preserving the parent link and manually assigned salary sources.
 - `POST /api/deposits/:id/archive`: soft-delete with dependency checks.
 - `DELETE /api/deposits/:id`: admin-only hard delete with dependent funding-link cleanup.
 
@@ -190,7 +191,7 @@ Quarterly products may opt into the `prorated-boundaries-v1` interest schedule. 
 - `POST /api/salary-savings?ownerUserId=<id>`: create a monthly target; requires portfolio write access.
 - `PUT /api/salary-savings/:id?ownerUserId=<id>`: update a target; requires portfolio write access.
 
-Writes validate the `YYYY-MM` month, positive target/line amounts, non-empty unavailability reasons, linked investment availability, and target/principal allocation limits. Creating a second record for the same owner/month returns a conflict. The interface filters records by selected April–March financial year and shows target, invested, unavailable, and available-to-invest totals.
+Writes validate the `YYYY-MM` month, positive target/line amounts, non-empty unavailability reasons, linked investment availability, and target/principal allocation limits. Creating a second record for the same owner/month returns a conflict. The interface filters records by selected April–March financial year, counts only open investments toward invested totals, and expands closed/superseded links as investment history.
 
 ### 5.7 Master Data
 
@@ -253,7 +254,7 @@ This file is currently the largest frontend coordination point and should be spl
 
 ### 6.4 Salary Savings
 
-- `src/features/salary/SalarySavingsView.jsx`: monthly target create/edit form, investment links, unavailable-amount reasons, financial-year filtering, and summary/record display. Shared portfolios and demo mode are read-only.
+- `src/features/salary/SalarySavingsView.jsx`: monthly target create/edit form, investment links, unavailable-amount reasons, financial-year filtering, summary/record display, and accessible success/error feedback after save. Shared portfolios and demo mode are read-only.
 - `src/features/salary/salarySavingsModel.js`: April–March filtering and target/invested/unavailable/remaining and per-investment funding summaries.
 
 ### 6.5 Master Data
@@ -337,7 +338,7 @@ The server validates workbook shape, normalizes dates/numbers/payout modes, vali
 - `Deposits`
 - `Salary Savings`
 
-Deposit and salary savings rows carry a `Record Data` JSON column so the backup can preserve full payloads while still exposing readable summary columns, including payout overrides, funding links, and timestamps. Version 2 requires a recognized backup type/version, record counts for all sheets, and the `Salary Savings` sheet; count mismatches block restore. Version 1 backups remain supported. If a version 1 backup has no `Salary Savings` sheet, the destination's existing salary records are preserved only when their links validate against the restored investments. The preview identifies that compatibility behavior.
+Deposit and salary savings rows carry a `Record Data` JSON column so the backup can preserve full payloads while still exposing readable summary columns, including payout overrides, parent investment lineage, funding links, and timestamps. Version 3 requires a recognized backup type/version, record counts for all sheets, and the `Salary Savings` sheet; parent investment references are validated before restore. Versions 1 and 2 remain supported. If a version 1 backup has no `Salary Savings` sheet, the destination's existing salary records are preserved only when their links validate against the restored investments. The preview identifies that compatibility behavior.
 
 The preview displays the backup source and restore destination. Restoring a backup from a different or unidentified source requires an explicit confirmation. Restore converts serialized record timestamps back to database dates and replaces the destination's investments, salary savings, and master data transactionally. User accounts, sessions, portfolio shares, and audit history are not included in portfolio backups.
 

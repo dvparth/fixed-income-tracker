@@ -1,6 +1,6 @@
 export const BACKUP_TYPE = 'YieldFlow full backup'
-export const BACKUP_WORKBOOK_VERSION = '2'
-export const SUPPORTED_BACKUP_WORKBOOK_VERSIONS = ['1', BACKUP_WORKBOOK_VERSION]
+export const BACKUP_WORKBOOK_VERSION = '3'
+export const SUPPORTED_BACKUP_WORKBOOK_VERSIONS = ['1', '2', BACKUP_WORKBOOK_VERSION]
 
 export const BACKUP_SHEETS = {
   metadata: 'Metadata',

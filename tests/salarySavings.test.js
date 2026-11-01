@@ -6,6 +6,7 @@ import request from 'supertest'
 import XLSX from 'xlsx'
 import {
   filterSavingsByFinancialYear,
+  splitInvestmentAllocations,
   summarizeInvestmentSalaryFunding,
   summarizeSavings,
 } from '../src/features/salary/salarySavingsModel.js'
@@ -167,6 +168,38 @@ test('salary summaries total targets, invested, unavailable, and remaining amoun
   ]), { savings: 1500, invested: 900, unavailable: 100, remaining: 500 })
 })
 
+test('salary totals count only current investment generations and retain closed funding history', () => {
+  const saving = {
+    amount: 1000,
+    unavailable: [{ amount: 100, reason: 'Expense' }],
+    investmentAllocations: [
+      { id: 'old-link', investmentId: 'old-investment', amount: 500 },
+      { id: 'middle-link', investmentId: 'middle-investment', amount: 100 },
+      { id: 'new-link', investmentId: 'new-investment', amount: 250 },
+    ],
+  }
+  const investments = [
+    { id: 'old-investment', status: 'Closed' },
+    { id: 'middle-investment', status: 'Closed' },
+    { id: 'new-investment', status: 'Open' },
+  ]
+
+  const allocations = splitInvestmentAllocations(saving, investments)
+  assert.deepEqual(allocations.current, [
+    { id: 'new-link', investmentId: 'new-investment', amount: 250, isHistorical: false },
+  ])
+  assert.deepEqual(allocations.history.map((link) => link.investmentId), [
+    'old-investment',
+    'middle-investment',
+  ])
+  assert.deepEqual(summarizeSavings([saving], investments), {
+    savings: 1000,
+    invested: 250,
+    unavailable: 100,
+    remaining: 650,
+  })
+})
+
 test('investment salary funding only includes links to the selected investment', () => {
   assert.deepEqual(summarizeInvestmentSalaryFunding([
     { salaryMonth: '2026-04', investmentAllocations: [{ investmentId: 'deposit-1', amount: 300 }] },
@@ -294,7 +327,7 @@ test('backup validation rejects missing version, metadata count mismatch, and in
   assert.ok(invalidDate.rowErrors[0].messages.some((message) => message.includes('Investment date')))
 })
 
-test('version 2 backup exports and validates current investment and salary data', () => {
+test('current backup format exports and validates investment and salary data', () => {
   const investment = {
     ...validDeposit().payload,
     ownerUserId,
@@ -338,6 +371,75 @@ test('version 2 backup exports and validates current investment and salary data'
   ])
   assert.equal(result.snapshot.deposits[0].createdAt, investment.createdAt.toISOString())
   assert.equal(result.snapshot.salarySavings[0].createdAt, saving.createdAt.toISOString())
+})
+
+test('version 3 backup preserves parent lineage and closed salary links without double-counting', () => {
+  const parent = {
+    ...validDeposit().payload,
+    id: 'parent-investment',
+    status: 'Closed',
+  }
+  const successor = {
+    ...validDeposit().payload,
+    id: 'successor-investment',
+    parentInvestmentId: parent.id,
+    status: 'Open',
+    principalAmount: 400,
+    allocations: [{ eventId: 'maturity:parent-investment', amount: 400 }],
+  }
+  const saving = {
+    ...salarySaving({
+      amount: 1000,
+      unavailable: [{ id: 'unavailable-1', amount: 100, reason: 'Expense' }],
+      investmentAllocations: [
+        { id: 'old-link', investmentId: parent.id, amount: 600 },
+        { id: 'new-link', investmentId: successor.id, amount: 400 },
+      ],
+    }),
+    ownerUserId,
+  }
+  const workbookBuffer = buildBackupWorkbookBuffer({
+    portfolioLabel: 'Test Owner',
+    ownerUserId,
+    deposits: [parent, successor],
+    masterData: {
+      owners: [{ id: 'owner-1', name: 'Owner', aliases: [], taxSlabRate: 0 }],
+      institutions: [{ id: 'bank-1', name: 'Bank', branches: [] }],
+      instrumentTypes: [{ id: 'fd-1', name: 'FD' }],
+    },
+    salarySavings: [saving],
+  })
+  const parsed = parseBackupWorkbook(workbookBuffer)
+  const result = validateBackupSnapshot(parsed)
+
+  assert.equal(parsed.metadataRows.find((row) => row.Field === 'Workbook version').Value, '3')
+  assert.equal(result.hasErrors, false, JSON.stringify({ errors: result.errors, rowErrors: result.rowErrors }))
+  assert.equal(result.snapshot.deposits[1].parentInvestmentId, parent.id)
+  assert.deepEqual(result.snapshot.salarySavings[0].investmentAllocations, saving.investmentAllocations)
+})
+
+test('backup validation rejects missing, open, self-referencing, and cyclic investment parents', () => {
+  const missingParent = validate([], [
+    validDeposit({ parentInvestmentId: 'missing-parent' }),
+  ])
+  assert.ok(missingParent.rowErrors.some((row) => row.messages.some((message) => message.includes('Parent investment'))))
+
+  const openParent = validate([], [
+    validDeposit({ id: 'parent-open', status: 'Open' }),
+    validDeposit({ id: 'child-open-parent', parentInvestmentId: 'parent-open' }),
+  ])
+  assert.ok(openParent.rowErrors.some((row) => row.messages.some((message) => message.includes('must be closed'))))
+
+  const selfParent = validate([], [
+    validDeposit({ parentInvestmentId: 'deposit-1' }),
+  ])
+  assert.ok(selfParent.rowErrors.some((row) => row.messages.some((message) => message.includes('own parent'))))
+
+  const cycle = validate([], [
+    validDeposit({ id: 'cycle-a', status: 'Closed', parentInvestmentId: 'cycle-b' }),
+    validDeposit({ id: 'cycle-b', status: 'Closed', parentInvestmentId: 'cycle-a' }),
+  ])
+  assert.ok(cycle.rowErrors.some((row) => row.messages.some((message) => message.includes('cycle'))))
 })
 
 test('backup preview shows source identity and restore requires confirmation for another portfolio', async () => {
@@ -495,9 +597,20 @@ test('backup restore converts investment and salary timestamps back to dates', a
       deposits: [{
         ...validDeposit().payload,
         ownerUserId,
+        status: 'Closed',
         createdAt: investmentCreatedAt,
         updatedAt: investmentCreatedAt,
         allocations: [],
+        cashSettlements: [],
+      }, {
+        ...validDeposit().payload,
+        id: 'successor-1',
+        parentInvestmentId: 'deposit-1',
+        ownerUserId,
+        status: 'Open',
+        createdAt: investmentCreatedAt,
+        updatedAt: investmentCreatedAt,
+        allocations: [{ eventId: 'maturity:deposit-1', amount: 300 }],
         cashSettlements: [],
       }],
       masterData: {
@@ -506,7 +619,12 @@ test('backup restore converts investment and salary timestamps back to dates', a
         instrumentTypes: [{ id: 'fd-1', name: 'FD' }],
       },
       salarySavings: [{
-        ...salarySaving(),
+        ...salarySaving({
+          investmentAllocations: [
+            { id: 'old-link', investmentId: 'deposit-1', amount: 700 },
+            { id: 'successor-link', investmentId: 'successor-1', amount: 300 },
+          ],
+        }),
         ownerUserId,
         createdAt: savingCreatedAt,
         updatedAt: savingCreatedAt,
@@ -520,8 +638,10 @@ test('backup restore converts investment and salary timestamps back to dates', a
       .attach('file', workbookBuffer, 'backup.xlsx')
       .expect(200)
 
+    assert.equal(restoredInvestments.length, 2)
     assert.ok(restoredInvestments[0].createdAt instanceof Date)
     assert.equal(restoredInvestments[0].createdAt.toISOString(), investmentCreatedAt.toISOString())
+    assert.equal(restoredInvestments[1].parentInvestmentId, 'deposit-1')
     assert.ok(restoredSavings[0].createdAt instanceof Date)
     assert.equal(restoredSavings[0].createdAt.toISOString(), savingCreatedAt.toISOString())
   } finally {
@@ -570,6 +690,184 @@ test('salary savings API rejects over-target and over-investment allocations', a
     .send({ salaryMonth: '2026-07', amount: 1500, investmentAllocations: [{ investmentId: 'investment-2', amount: 1100 }] })
     .expect(400)
   assert.match(overInvestment.body.message, /cannot exceed its investment amount/)
+})
+
+test('renewal atomically carries selected amounts from multiple salary months and keeps the remainder available', async () => {
+  assert.equal(mongoose.connection.readyState, 0, 'salary renewal tests must not connect to MongoDB')
+
+  const originals = {
+    startSession: mongoose.startSession,
+    depositFind: Deposit.find,
+    depositFindOne: Deposit.findOne,
+    depositFindOneAndUpdate: Deposit.findOneAndUpdate,
+    depositCreate: Deposit.create,
+    salaryFind: SalarySaving.find,
+    salaryFindOneAndUpdate: SalarySaving.findOneAndUpdate,
+  }
+  const previousSavings = storedSalarySavings.splice(0)
+  const parent = {
+    id: 'investment-1',
+    ownerUserId,
+    bankName: 'Test Bank',
+    accountNumber: 'A-1',
+    principalAmount: 1000,
+    status: 'Open',
+    isDeleted: false,
+  }
+  const sourceSavings = [
+    {
+      id: 'salary-source-1',
+      ownerUserId,
+      salaryMonth: '2026-04',
+      amount: 800,
+      unavailable: [{ id: 'unavailable-1', amount: 100, reason: 'Expense' }],
+      investmentAllocations: [{ id: 'source-link-1', investmentId: parent.id, amount: 400 }],
+    },
+    {
+      id: 'salary-source-2',
+      ownerUserId,
+      salaryMonth: '2026-05',
+      amount: 700,
+      unavailable: [],
+      investmentAllocations: [{ id: 'source-link-2', investmentId: parent.id, amount: 300 }],
+    },
+  ]
+  storedSalarySavings.push(...sourceSavings)
+  let transactionCount = 0
+  let parentState = parent
+
+  mongoose.startSession = async () => ({
+    withTransaction: async (operation) => {
+      transactionCount += 1
+      await operation()
+    },
+    endSession: async () => {},
+  })
+  Deposit.findOne = (query) => ({
+    lean: async () => query.id === parent.id && query.ownerUserId === ownerUserId ? parentState : null,
+  })
+  Deposit.find = (query = {}) => ({
+    lean: async () => [parentState, ...testInvestments.filter((item) => item.id !== parent.id)]
+      .filter((investment) => !query.id?.$in || query.id.$in.includes(investment.id)),
+  })
+  Deposit.findOneAndUpdate = (query, update) => ({
+    lean: async () => {
+      if (query.id !== parent.id || query.status?.$ne !== 'Closed') return null
+      parentState = { ...parentState, ...update }
+      return parentState
+    },
+  })
+  Deposit.create = async ([payload]) => {
+    testInvestments.push(payload)
+    return [{ toObject: () => payload }]
+  }
+  SalarySaving.find = (query = {}) => ({
+    sort() { return this },
+    lean: async () => storedSalarySavings.filter((saving) => !query.ownerUserId || saving.ownerUserId === query.ownerUserId),
+  })
+  SalarySaving.findOneAndUpdate = (query, update) => ({
+    lean: async () => {
+      const saving = storedSalarySavings.find((item) => item.id === query.id && item.ownerUserId === query.ownerUserId)
+      if (!saving) return null
+      saving.investmentAllocations.push(update.$push.investmentAllocations)
+      return saving
+    },
+  })
+
+  try {
+    const response = await authenticatedRequest('post', `/api/deposits/${parent.id}/renew?ownerUserId=${ownerUserId}`)
+      .set('Origin', 'https://app.example.test')
+      .send({
+        closedInvestment: { id: parent.id, status: 'Closed', principalAmount: 1000 },
+        successorInvestment: { id: 'renewed-investment', status: 'Open', principalAmount: 500 },
+        salaryAllocations: [
+          { salarySavingId: sourceSavings[0].id, amount: 250 },
+          { salarySavingId: sourceSavings[1].id, amount: 100 },
+        ],
+      })
+      .expect(201)
+
+    assert.equal(transactionCount, 1)
+    assert.equal(response.body.parent.status, 'Closed')
+    assert.equal(response.body.successor.parentInvestmentId, parent.id)
+    assert.deepEqual(sourceSavings.map((saving) => saving.investmentAllocations.at(-1)), [
+      { id: sourceSavings[0].investmentAllocations.at(-1).id, investmentId: 'renewed-investment', amount: 250 },
+      { id: sourceSavings[1].investmentAllocations.at(-1).id, investmentId: 'renewed-investment', amount: 100 },
+    ])
+
+    const salaryResponse = await authenticatedRequest('get', `/api/salary-savings?ownerUserId=${ownerUserId}`)
+      .expect(200)
+    const firstSalaryView = salaryResponse.body.find((saving) => saving.id === sourceSavings[0].id)
+    assert.equal(firstSalaryView.investedAmount, 250)
+    assert.equal(firstSalaryView.historicalAmount, 400)
+    assert.equal(firstSalaryView.remainingAmount, 450)
+    assert.equal(firstSalaryView.investmentAllocations.find((link) => link.investmentId === parent.id).isHistorical, true)
+    assert.equal(firstSalaryView.investmentAllocations.find((link) => link.investmentId === 'renewed-investment').isHistorical, false)
+
+    const normalizedSources = sourceSavings.map((saving) => {
+      const investments = [
+        { id: parent.id, status: 'Closed' },
+        { id: 'renewed-investment', status: 'Open' },
+      ]
+      return summarizeSavings([{
+        ...saving,
+        investmentAllocations: saving.investmentAllocations.map((link) => ({
+          ...link,
+          isHistorical: link.investmentId === parent.id,
+        })),
+      }], investments)
+    })
+    assert.equal(normalizedSources[0].invested, 250)
+    assert.equal(normalizedSources[0].remaining, 450)
+    assert.equal(normalizedSources[1].invested, 100)
+    assert.equal(normalizedSources[1].remaining, 600)
+  } finally {
+    mongoose.startSession = originals.startSession
+    Deposit.find = originals.depositFind
+    Deposit.findOne = originals.depositFindOne
+    Deposit.findOneAndUpdate = originals.depositFindOneAndUpdate
+    Deposit.create = originals.depositCreate
+    SalarySaving.find = originals.salaryFind
+    SalarySaving.findOneAndUpdate = originals.salaryFindOneAndUpdate
+    storedSalarySavings.splice(0, storedSalarySavings.length, ...previousSavings)
+    testInvestments.splice(testInvestments.findIndex((item) => item.id === 'renewed-investment'), 1)
+  }
+})
+
+test('renewal rejects salary assignments above successor principal and parent attribution', async () => {
+  assert.equal(mongoose.connection.readyState, 0, 'salary renewal tests must not connect to MongoDB')
+  const previousSavings = storedSalarySavings.splice(0)
+  storedSalarySavings.push({
+    id: 'renewal-source',
+    ownerUserId,
+    salaryMonth: '2026-06',
+    amount: 1000,
+    unavailable: [],
+    investmentAllocations: [{ id: 'renewal-source-link', investmentId: 'investment-1', amount: 500 }],
+  })
+  try {
+    const overPrincipal = await authenticatedRequest('post', `/api/deposits/investment-1/renew?ownerUserId=${ownerUserId}`)
+      .set('Origin', 'https://app.example.test')
+      .send({
+        closedInvestment: { id: 'investment-1', status: 'Closed' },
+        successorInvestment: { id: 'renewal-rejected', status: 'Open', principalAmount: 200 },
+        salaryAllocations: [{ salarySavingId: 'renewal-source', amount: 300 }],
+      })
+      .expect(400)
+    assert.match(overPrincipal.body.message, /cannot exceed its principal/)
+
+    const overParentAttribution = await authenticatedRequest('post', `/api/deposits/investment-1/renew?ownerUserId=${ownerUserId}`)
+      .set('Origin', 'https://app.example.test')
+      .send({
+        closedInvestment: { id: 'investment-1', status: 'Closed' },
+        successorInvestment: { id: 'renewal-rejected', status: 'Open', principalAmount: 600 },
+        salaryAllocations: [{ salarySavingId: 'renewal-source', amount: 600 }],
+      })
+      .expect(400)
+    assert.match(overParentAttribution.body.message, /cannot exceed its amount linked to the parent/)
+  } finally {
+    storedSalarySavings.splice(0, storedSalarySavings.length, ...previousSavings)
+  }
 })
 
 test('linked investments cannot be archived or permanently deleted', async () => {

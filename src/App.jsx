@@ -528,6 +528,7 @@ function App() {
   const [isDownloadingWorkbook, setIsDownloadingWorkbook] = useState(false)
   const [deposits, setDeposits] = useState([])
   const [salarySavings, setSalarySavings] = useState([])
+  const [salarySaveFeedback, setSalarySaveFeedback] = useState('')
   const [masterData, setMasterData] = useState(emptyMasterData)
   const [activeTab, setActiveTab] = useState('dashboard')
   const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 780)
@@ -1777,6 +1778,7 @@ function App() {
 
   const mapDepositToFormValues = (deposit) => ({
     srNo: deposit.srNo ?? '',
+    parentInvestmentId: deposit.parentInvestmentId ?? '',
     bankName: deposit.bankName ?? '',
     branchCity: deposit.branchCity ?? '',
     holderName: deposit.holderName ?? '',
@@ -2045,6 +2047,7 @@ function App() {
       totalInterestEarned: '',
       tdsAmount: '',
       status: 'Open',
+      parentInvestmentId: deposit.id,
       allocationsText,
       notes: '',
     }
@@ -2060,6 +2063,24 @@ function App() {
           ),
         ])
       })
+      setSalarySavings((current) => current.map((saving) => {
+        const allocation = renewalValues.salaryAllocations.find(
+          (item) => item.salarySavingId === saving.id && Number(item.amount || 0) > 0,
+        )
+        return allocation
+          ? {
+              ...saving,
+              investmentAllocations: [
+                ...(saving.investmentAllocations || []),
+                {
+                  id: `${savedDeposit.id}-${saving.id}`,
+                  investmentId: savedDeposit.id,
+                  amount: Number(allocation.amount),
+                },
+              ],
+            }
+          : saving
+      }))
       focusDepositAfterSave(savedDeposit, true)
       return savedDeposit
     }
@@ -2067,18 +2088,22 @@ function App() {
     try {
       setRenewingInvestmentId(deposit.id)
       setLoadError('')
-      const savedClosedDeposit = hydrateDeposit(
-        await requestJson(buildOwnerScopedPath(`/api/deposits/${deposit.id}`, activePortfolioOwnerId), {
-          method: 'PUT',
-          body: JSON.stringify(closedDeposit),
-        }),
-      )
-      const savedDeposit = hydrateDeposit(
-        await requestJson(buildOwnerScopedPath('/api/deposits', activePortfolioOwnerId), {
+      const renewalResponse = await requestJson(
+        buildOwnerScopedPath(`/api/deposits/${deposit.id}/renew`, activePortfolioOwnerId),
+        {
           method: 'POST',
-          body: JSON.stringify(normalized),
-        }),
+          body: JSON.stringify({
+            closedInvestment: closedDeposit,
+            successorInvestment: normalized,
+            salaryAllocations: renewalValues.salaryAllocations.map((item) => ({
+              salarySavingId: item.salarySavingId,
+              amount: Number(item.amount || 0),
+            })),
+          }),
+        },
       )
+      const savedClosedDeposit = hydrateDeposit(renewalResponse.parent)
+      const savedDeposit = hydrateDeposit(renewalResponse.successor)
 
       startTransition(() => {
         setDeposits((current) => [
@@ -2088,6 +2113,24 @@ function App() {
           ),
         ])
       })
+      setSalarySavings((current) => current.map((saving) => {
+        const allocation = renewalValues.salaryAllocations.find(
+          (item) => item.salarySavingId === saving.id && Number(item.amount || 0) > 0,
+        )
+        return allocation
+          ? {
+              ...saving,
+              investmentAllocations: [
+                ...(saving.investmentAllocations || []),
+                {
+                  id: `${savedDeposit.id}-${saving.id}`,
+                  investmentId: savedDeposit.id,
+                  amount: Number(allocation.amount),
+                },
+              ],
+            }
+          : saving
+      }))
       focusDepositAfterSave(savedDeposit, true)
       return savedDeposit
     } catch (error) {
@@ -2985,8 +3028,8 @@ function App() {
   const fundingDifference =
     formValues.principalAmount === '' ? null : principalAmountValue - linkedFundingAmount
   const salaryFundingSummary = useMemo(
-    () => summarizeInvestmentSalaryFunding(salarySavings, editingId, principalAmountValue),
-    [editingId, principalAmountValue, salarySavings],
+    () => summarizeInvestmentSalaryFunding(salarySavings, editingId, principalAmountValue, deposits),
+    [deposits, editingId, principalAmountValue, salarySavings],
   )
   const sourcePreviewEvents = fundingEntries
     .map((entry) => cashFlowMap.get(entry.eventId))
@@ -4683,6 +4726,7 @@ function App() {
           startCloning={startCloning}
           startEditing={startEditing}
           renewInvestment={renewInvestment}
+          salarySavings={salarySavings}
           renewingInvestmentId={renewingInvestmentId}
           startArchive={startArchive}
           cancelArchive={cancelArchive}
@@ -4718,7 +4762,12 @@ function App() {
           selectedFinancialYear={selectedFinancialYear}
           financialYearOptions={financialYearOptions}
           onFinancialYearChange={setSelectedFinancialYear}
-          onSaved={async () => setPortfolioReloadSeed((current) => current + 1)}
+          saveFeedback={salarySaveFeedback}
+          onSaveStarted={() => setSalarySaveFeedback('')}
+          onSaved={(message) => {
+            setSalarySaveFeedback(message)
+            setPortfolioReloadSeed((current) => current + 1)
+          }}
         />
       )}
 

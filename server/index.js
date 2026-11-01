@@ -339,6 +339,7 @@ const interestPayoutOverrideSchema = z.object({
 }).strict()
 const depositWriteBodySchema = z.object({
   id: z.string().trim().min(1).max(240).optional(),
+  parentInvestmentId: optionalTextField,
   srNo: numericFormField,
   bankName: optionalTextField,
   branchCity: optionalTextField,
@@ -379,6 +380,15 @@ const depositWriteBodySchema = z.object({
   updatedAt: backupTimestampField,
   _id: z.any().optional(),
   __v: z.any().optional(),
+}).strict()
+const investmentRenewalAllocationSchema = z.object({
+  salarySavingId: z.string().trim().min(1).max(240),
+  amount: z.number().nonnegative(),
+}).strict()
+const investmentRenewalBodySchema = z.object({
+  closedInvestment: depositWriteBodySchema,
+  successorInvestment: depositWriteBodySchema,
+  salaryAllocations: z.array(investmentRenewalAllocationSchema).optional(),
 }).strict()
 const namedMasterItemSchema = z.object({
   id: z.string().trim().max(120).optional(),
@@ -1426,8 +1436,8 @@ const validateBackupSnapshot = ({
   } else if (!isSupportedVersion) {
     errors.push(`Backup version ${backupVersion} is not supported.`)
   }
-  if (isSupportedVersion && backupVersion === BACKUP_WORKBOOK_VERSION && !salarySavingsSheetPresent) {
-    errors.push('Version 2 backups must contain a Salary Savings sheet.')
+  if (isSupportedVersion && backupVersion !== '1' && !salarySavingsSheetPresent) {
+    errors.push(`Version ${backupVersion} backups must contain a Salary Savings sheet.`)
   }
 
   const countFields = [
@@ -1438,7 +1448,7 @@ const validateBackupSnapshot = ({
     ['instrumentTypeCount', 'Instrument type count'],
     ['salarySavingsCount', 'Salary savings count'],
   ]
-  const requiredCountFields = backupVersion === BACKUP_WORKBOOK_VERSION
+  const requiredCountFields = backupVersion !== '1'
     ? countFields
     : countFields.filter(([key]) => key !== 'salarySavingsCount' && key !== 'branchCount')
   if (isSupportedVersion) {
@@ -1631,6 +1641,19 @@ const validateBackupSnapshot = ({
     }
 
     const referenceErrors = []
+    const parentInvestmentId = String(deposit.payload.parentInvestmentId || '').trim()
+    if (parentInvestmentId) {
+      if (parentInvestmentId === deposit.payload.id) {
+        referenceErrors.push('Investment cannot be its own parent.')
+      } else if (!knownDepositIds.has(parentInvestmentId)) {
+        referenceErrors.push(`Parent investment "${parentInvestmentId}" is not present as a valid investment in this backup.`)
+      } else {
+        const parent = parsedDeposits.find((entry) => entry.payload?.id === parentInvestmentId)?.payload
+        if (String(parent?.status || '').toLowerCase() !== 'closed') {
+          referenceErrors.push(`Parent investment "${parentInvestmentId}" must be closed.`)
+        }
+      }
+    }
     ;[...(deposit.payload.allocations || []), ...(deposit.payload.cashSettlements || [])].forEach((entry) => {
       const eventId = String(entry?.eventId || '').trim()
       if (!eventId) {
@@ -1664,6 +1687,29 @@ const validateBackupSnapshot = ({
         })
       }
       deposit.errors.push(...referenceErrors)
+    }
+  })
+
+  const parentByInvestment = new Map(
+    parsedDeposits
+      .filter((entry) => entry.errors.length === 0 && entry.payload?.parentInvestmentId)
+      .map((entry) => [entry.payload.id, entry.payload.parentInvestmentId]),
+  )
+  parsedDeposits.forEach((deposit) => {
+    if (deposit.errors.length > 0 || !deposit.payload) return
+    const visited = new Set([deposit.payload.id])
+    let parentId = parentByInvestment.get(deposit.payload.id)
+    while (parentId) {
+      if (visited.has(parentId)) {
+        const message = 'Investment parent links cannot contain a cycle.'
+        const existing = rowErrors.find((entry) => entry.rowNumber === deposit.rowNumber)
+        if (existing) existing.messages.push(message)
+        else rowErrors.push({ rowNumber: deposit.rowNumber, messages: [message] })
+        deposit.errors.push(message)
+        break
+      }
+      visited.add(parentId)
+      parentId = parentByInvestment.get(parentId)
     }
   })
 
@@ -1765,7 +1811,10 @@ const validateBackupSnapshot = ({
       }
     })
 
-    const allocatedAmount = [...safeUnavailable, ...safeAllocations].reduce(
+    const activeSalaryAllocations = safeAllocations.filter((item) =>
+      String(validDepositsById.get(item?.investmentId)?.status || '').toLowerCase() !== 'closed',
+    )
+    const allocatedAmount = [...safeUnavailable, ...activeSalaryAllocations].reduce(
       (sum, item) => sum + (typeof item?.amount === 'number' ? item.amount : 0),
       0,
     )
@@ -2807,7 +2856,7 @@ const removeFundingLinksForDeletedDeposit = async ({
       continue
     }
 
-    const updated = await Deposit.findOneAndUpdate(
+      const updated = await Deposit.findOneAndUpdate(
       buildUpdateQuery(normalizedSibling.id, ownerUserId),
       {
         $set: {
@@ -3480,18 +3529,59 @@ const normalizeSalarySaving = (saving, investmentById = new Map()) => {
     ? saving.investmentAllocations
     : []
   const unavailableAmount = unavailable.reduce((sum, item) => sum + Number(item.amount || 0), 0)
-  const investedAmount = investmentAllocations.reduce((sum, item) => sum + Number(item.amount || 0), 0)
+  const allocationsWithHistory = investmentAllocations.map((item) => {
+    const investment = investmentById.get(item.investmentId)
+    const isHistorical = Boolean(
+      item.isHistorical ||
+      (investmentById.size > 0 &&
+        (!investment || String(investment.status || '').toLowerCase() === 'closed'))
+    )
+    return {
+      ...item,
+      isHistorical,
+      investmentLabel: investment?.label || 'Archived or removed investment',
+      investmentDate: investment?.investmentDate || '',
+      investmentStatus: investment?.status || '',
+      parentInvestmentId: investment?.parentInvestmentId || '',
+      parentInvestmentLabel: investmentById.get(investment?.parentInvestmentId)?.label || '',
+    }
+  })
+  const investedAmount = allocationsWithHistory.reduce(
+    (sum, item) => sum + (item.isHistorical ? 0 : Number(item.amount || 0)),
+    0,
+  )
+  const historicalAmount = allocationsWithHistory.reduce(
+    (sum, item) => sum + (item.isHistorical ? Number(item.amount || 0) : 0),
+    0,
+  )
   return {
     ...saving,
     unavailable,
-    investmentAllocations: investmentAllocations.map((item) => ({
-      ...item,
-      investmentLabel: investmentById.get(item.investmentId) || 'Archived or removed investment',
-    })),
+    investmentAllocations: allocationsWithHistory,
     unavailableAmount,
     investedAmount,
+    historicalAmount,
     remainingAmount: Math.max(Number(saving.amount || 0) - unavailableAmount - investedAmount, 0),
   }
+}
+
+const normalizeSalarySavingForOwner = async (saving, ownerUserId) => {
+  const investmentIds = [...new Set(
+    (saving.investmentAllocations || []).map((allocation) => allocation.investmentId),
+  )]
+  const investments = investmentIds.length > 0
+    ? await Deposit.find({ ownerUserId, id: { $in: investmentIds } }).lean()
+    : []
+  const investmentById = new Map(investments.map((investment) => [investment.id, {
+    status: investment.status,
+    label: `${investment.bankName || 'Investment'} · ${investment.accountNumber || investment.id}`,
+    investmentDate: investment.investmentDate,
+    parentInvestmentId: investment.parentInvestmentId,
+  }]))
+  investmentById.forEach((investment) => {
+    investment.parentInvestmentLabel = investmentById.get(investment.parentInvestmentId)?.label || ''
+  })
+  return normalizeSalarySaving(saving, investmentById)
 }
 
 const sanitizeSalarySavingPayload = async (payload, ownerUserId, excludedSavingId = '') => {
@@ -3499,42 +3589,70 @@ const sanitizeSalarySavingPayload = async (payload, ownerUserId, excludedSavingI
   const unavailable = (parsed.unavailable || []).map((item) => ({
     id: item.id || crypto.randomUUID(), amount: item.amount, reason: item.reason,
   }))
-  const investmentAllocations = (parsed.investmentAllocations || []).map((item) => ({
+  const submittedAllocations = (parsed.investmentAllocations || []).map((item) => ({
     id: item.id || crypto.randomUUID(), investmentId: item.investmentId, amount: item.amount,
   }))
-  const allocated = [...unavailable, ...investmentAllocations].reduce(
-    (sum, item) => sum + Number(item.amount || 0),
-    0,
-  )
-  if (allocated > parsed.amount + 0.0001) {
-    throw new Error('Invested and unavailable amounts cannot exceed the monthly savings amount.')
-  }
-  const investmentIds = [...new Set(investmentAllocations.map((item) => item.investmentId))]
-  if (investmentIds.length > 0) {
-    const investments = await Deposit.find({
+  const existingSaving = excludedSavingId
+    ? await SalarySaving.findOne({ ownerUserId, id: excludedSavingId }).lean()
+    : null
+  const existingInvestmentIds = (existingSaving?.investmentAllocations || []).map((item) => item.investmentId)
+  const investmentIds = [...new Set([
+    ...submittedAllocations.map((item) => item.investmentId),
+    ...existingInvestmentIds,
+  ])]
+  const investments = investmentIds.length > 0
+    ? await Deposit.find({
       ownerUserId,
       id: { $in: investmentIds },
       isDeleted: { $ne: true },
     }).lean()
-    if (investments.length !== investmentIds.length) {
+    : []
+  const investmentsById = new Map(investments.map((investment) => [investment.id, investment]))
+  const unavailableInvestment = submittedAllocations.find((allocation) =>
+    String(investmentsById.get(allocation.investmentId)?.status || '').toLowerCase() === 'closed',
+  )
+  if (unavailableInvestment) {
+    throw new Error('Closed investments are history only and cannot receive new salary allocations.')
+  }
+  const submittedInvestmentIds = new Set(submittedAllocations.map((item) => item.investmentId))
+  const historicalAllocations = (existingSaving?.investmentAllocations || []).filter((item) => {
+    const investment = investmentsById.get(item.investmentId)
+    return !submittedInvestmentIds.has(item.investmentId) &&
+      (!investment || String(investment.status || '').toLowerCase() === 'closed' || item.isHistorical)
+  })
+  const investmentAllocations = [...submittedAllocations, ...historicalAllocations]
+  const currentAllocations = submittedAllocations
+  const allocated = [
+    ...unavailable,
+    ...currentAllocations,
+  ].reduce((sum, item) => sum + Number(item.amount || 0), 0)
+  if (allocated > parsed.amount + 0.0001) {
+    throw new Error('Invested and unavailable amounts cannot exceed the monthly savings amount.')
+  }
+  const submittedIds = [...new Set(submittedAllocations.map((item) => item.investmentId))]
+  if (submittedIds.length > 0 && submittedIds.some((investmentId) => !investmentsById.has(investmentId))) {
       throw new Error('One or more selected investments are unavailable.')
-    }
-
+  }
+  const activeInvestmentIds = submittedIds.filter((investmentId) =>
+    String(investmentsById.get(investmentId)?.status || '').toLowerCase() !== 'closed',
+  )
+  if (activeInvestmentIds.length > 0) {
     const otherSavings = await SalarySaving.find({
       ownerUserId,
       ...(excludedSavingId ? { id: { $ne: excludedSavingId } } : {}),
-      'investmentAllocations.investmentId': { $in: investmentIds },
+      'investmentAllocations.investmentId': { $in: activeInvestmentIds },
     }).lean()
     const linkedByInvestment = new Map()
     otherSavings.forEach((saving) => (saving.investmentAllocations || []).forEach((link) => {
-      if (investmentIds.includes(link.investmentId)) {
+      if (activeInvestmentIds.includes(link.investmentId)) {
         linkedByInvestment.set(link.investmentId, (linkedByInvestment.get(link.investmentId) || 0) + Number(link.amount || 0))
       }
     }))
-    investmentAllocations.forEach((link) => {
+    currentAllocations.forEach((link) => {
       linkedByInvestment.set(link.investmentId, (linkedByInvestment.get(link.investmentId) || 0) + Number(link.amount || 0))
     })
     const overAllocated = investments.find((investment) =>
+      activeInvestmentIds.includes(investment.id) &&
       (linkedByInvestment.get(investment.id) || 0) > Number(investment.principalAmount || 0) + 0.0001,
     )
     if (overAllocated) {
@@ -3550,7 +3668,15 @@ app.get('/api/salary-savings', requireAuth, validateRequest(ownerScopedQuerySche
     SalarySaving.find({ ownerUserId: request.portfolioContext.ownerUserId }).sort({ salaryMonth: -1 }).lean(),
     Deposit.find({ ownerUserId: request.portfolioContext.ownerUserId, isDeleted: { $ne: true } }).lean(),
   ])
-  const investmentById = new Map(investments.map((item) => [item.id, `${item.bankName || 'Investment'} · ${item.accountNumber || item.id}`]))
+  const investmentById = new Map(investments.map((item) => [item.id, {
+    status: item.status,
+    label: `${item.bankName || 'Investment'} · ${item.accountNumber || item.id}`,
+    investmentDate: item.investmentDate,
+    parentInvestmentId: item.parentInvestmentId,
+  }]))
+  investmentById.forEach((investment) => {
+    investment.parentInvestmentLabel = investmentById.get(investment.parentInvestmentId)?.label || ''
+  })
   response.json(savings.map((saving) => normalizeSalarySaving(saving, investmentById)))
 })
 
@@ -3564,7 +3690,7 @@ app.post('/api/salary-savings', writeRateLimiter, requireAuth, validateRequest(o
       createdByUserId: request.sessionUser.id,
       updatedByUserId: request.sessionUser.id,
     })
-    response.status(201).json(normalizeSalarySaving(created.toObject()))
+    response.status(201).json(await normalizeSalarySavingForOwner(created.toObject(), request.portfolioContext.ownerUserId))
   } catch (error) {
     response.status(error?.code === 11000 ? 409 : 400).json({ message: error?.code === 11000 ? 'A savings record already exists for this month.' : error.message })
   }
@@ -3582,7 +3708,7 @@ app.put('/api/salary-savings/:id', writeRateLimiter, requireAuth, validateReques
       response.status(404).json({ message: 'Salary savings record not found' })
       return
     }
-    response.json(normalizeSalarySaving(updated))
+    response.json(await normalizeSalarySavingForOwner(updated, request.portfolioContext.ownerUserId))
   } catch (error) {
     response.status(error?.code === 11000 ? 409 : 400).json({ message: error?.code === 11000 ? 'A savings record already exists for this month.' : error.message })
   }
@@ -3718,6 +3844,7 @@ app.put(
 
 app.post('/api/deposits', writeRateLimiter, requireAuth, validateRequest(ownerScopedQuerySchema, 'query'), resolvePortfolioContext, requirePortfolioWriteAccess, validateRequest(depositWriteBodySchema), async (request, response) => {
   const depositPayload = sanitizeDepositWritePayload(request.body)
+  delete depositPayload.parentInvestmentId
   const created = await Deposit.create({
     ...depositPayload,
     ownerUserId: request.portfolioContext.ownerUserId,
@@ -3747,10 +3874,12 @@ app.put('/api/deposits/:id', writeRateLimiter, requireAuth, validateRequest(idPa
     return
   }
 
+  const depositPayload = sanitizeDepositWritePayload(request.body)
+  depositPayload.parentInvestmentId = existing.parentInvestmentId || ''
   const updated = await Deposit.findOneAndUpdate(
     buildUpdateQuery(request.params.id, request.portfolioContext.ownerUserId),
     {
-      ...sanitizeDepositWritePayload(request.body),
+      ...depositPayload,
       ownerUserId: request.portfolioContext.ownerUserId,
       updatedByUserId: request.sessionUser.id,
     },
@@ -3768,6 +3897,171 @@ app.put('/api/deposits/:id', writeRateLimiter, requireAuth, validateRequest(idPa
   })
 
   response.json(normalizeDepositDoc(updated))
+})
+
+app.post('/api/deposits/:id/renew', writeRateLimiter, requireAuth, validateRequest(idParamSchema, 'params'), validateRequest(ownerScopedQuerySchema, 'query'), resolvePortfolioContext, requirePortfolioWriteAccess, validateRequest(investmentRenewalBodySchema), async (request, response) => {
+  const ownerUserId = request.portfolioContext.ownerUserId
+  const parentInvestmentId = request.params.id
+  const existingParent = await Deposit.findOne(
+    buildUpdateQuery(parentInvestmentId, ownerUserId),
+  ).lean()
+  if (!existingParent) {
+    response.status(404).json({ message: 'Investment not found.' })
+    return
+  }
+  if (String(existingParent.status || '').toLowerCase() === 'closed') {
+    response.status(409).json({ message: 'A closed investment cannot be renewed again.' })
+    return
+  }
+
+  const closedInvestment = sanitizeDepositWritePayload(request.body.closedInvestment)
+  const successorInvestment = sanitizeDepositWritePayload(request.body.successorInvestment)
+  if (closedInvestment.id !== parentInvestmentId || closedInvestment.status !== 'Closed') {
+    response.status(400).json({ message: 'Renewal must close the selected parent investment.' })
+    return
+  }
+  if (!successorInvestment.id || successorInvestment.id === parentInvestmentId) {
+    response.status(400).json({ message: 'Renewal must create a distinct successor investment.' })
+    return
+  }
+  successorInvestment.parentInvestmentId = parentInvestmentId
+  if (String(successorInvestment.status || '').toLowerCase() === 'closed') {
+    response.status(400).json({ message: 'A renewal successor must be open.' })
+    return
+  }
+
+  const requestedAllocations = request.body.salaryAllocations || []
+  const requestedSavingIds = new Set()
+  for (const allocation of requestedAllocations) {
+    if (requestedSavingIds.has(allocation.salarySavingId)) {
+      response.status(400).json({ message: 'A salary month can only be assigned once per renewal.' })
+      return
+    }
+    requestedSavingIds.add(allocation.salarySavingId)
+  }
+  const assignedTotal = requestedAllocations.reduce((sum, allocation) => sum + allocation.amount, 0)
+  if (assignedTotal > Number(successorInvestment.principalAmount || 0) + 0.0001) {
+    response.status(400).json({ message: 'Salary amounts assigned to the successor cannot exceed its principal.' })
+    return
+  }
+
+  const savings = await SalarySaving.find({ ownerUserId }).lean()
+  const portfolioInvestments = await Deposit.find({ ownerUserId }).lean()
+  const investmentById = new Map(portfolioInvestments.map((investment) => [investment.id, investment]))
+  const linkedBySavingId = new Map()
+  savings.forEach((saving) => {
+    const linkedAmount = (saving.investmentAllocations || [])
+      .filter((link) => link.investmentId === parentInvestmentId && !link.isHistorical)
+      .reduce((sum, link) => sum + Number(link.amount || 0), 0)
+    if (linkedAmount > 0) linkedBySavingId.set(saving.id, { saving, linkedAmount })
+  })
+
+  for (const allocation of requestedAllocations) {
+    if (allocation.amount === 0) continue
+    const source = linkedBySavingId.get(allocation.salarySavingId)
+    if (!source) {
+      response.status(400).json({ message: 'Salary allocations must come from salary months linked to the parent investment.' })
+      return
+    }
+    if (allocation.amount > source.linkedAmount + 0.0001) {
+      response.status(400).json({ message: `Salary allocation for ${source.saving.salaryMonth} cannot exceed its amount linked to the parent investment (${source.linkedAmount}).` })
+      return
+    }
+    const otherActiveAmount = (source.saving.investmentAllocations || [])
+      .filter((link) => {
+        const linkedInvestment = investmentById.get(link.investmentId)
+        return link.investmentId !== parentInvestmentId &&
+          !link.isHistorical &&
+          linkedInvestment &&
+          String(linkedInvestment.status || '').toLowerCase() !== 'closed'
+      })
+      .reduce((sum, link) => sum + Number(link.amount || 0), 0)
+    const unavailableAmount = (source.saving.unavailable || [])
+      .reduce((sum, item) => sum + Number(item.amount || 0), 0)
+    if (otherActiveAmount + unavailableAmount + allocation.amount > Number(source.saving.amount || 0) + 0.0001) {
+      response.status(400).json({ message: `Salary allocations for ${source.saving.salaryMonth} exceed its target amount.` })
+      return
+    }
+  }
+
+  const session = await mongoose.startSession()
+  let savedParent
+  let savedSuccessor
+  try {
+    await session.withTransaction(async () => {
+      savedParent = await Deposit.findOneAndUpdate(
+        { ...buildUpdateQuery(parentInvestmentId, ownerUserId), status: { $ne: 'Closed' } },
+        {
+          ...closedInvestment,
+          ownerUserId,
+          updatedByUserId: request.sessionUser.id,
+        },
+        { new: true, upsert: false, session },
+      ).lean()
+      if (!savedParent) {
+        const conflict = new Error('The parent investment was closed or changed before renewal.')
+        conflict.statusCode = 409
+        throw conflict
+      }
+
+      const [createdSuccessor] = await Deposit.create([{
+        ...successorInvestment,
+        ownerUserId,
+        createdByUserId: request.sessionUser.id,
+        updatedByUserId: request.sessionUser.id,
+      }], { session })
+      savedSuccessor = normalizeDepositDoc(createdSuccessor.toObject())
+
+      for (const allocation of requestedAllocations) {
+        if (allocation.amount <= 0) continue
+        const source = linkedBySavingId.get(allocation.salarySavingId)
+        const updatedSaving = await SalarySaving.findOneAndUpdate(
+          { id: allocation.salarySavingId, ownerUserId },
+          {
+            $push: {
+              investmentAllocations: {
+                id: crypto.randomUUID(),
+                investmentId: savedSuccessor.id,
+                amount: allocation.amount,
+              },
+            },
+            updatedByUserId: request.sessionUser.id,
+          },
+          { new: true, session },
+        ).lean()
+        if (!updatedSaving || !source) {
+          throw new Error(`Could not update salary month ${source?.saving.salaryMonth || allocation.salarySavingId}.`)
+        }
+      }
+
+      await writeAdminAuditLog({
+        actor: request.sessionUser,
+        action: 'admin.investment.update',
+        targetType: 'investment',
+        targetRecordId: parentInvestmentId,
+        targetOwnerUserId: ownerUserId,
+        before: normalizeDepositDoc(existingParent),
+        after: normalizeDepositDoc(savedParent),
+        session,
+      })
+      await writeAdminAuditLog({
+        actor: request.sessionUser,
+        action: 'admin.investment.create',
+        targetType: 'investment',
+        targetRecordId: savedSuccessor.id,
+        targetOwnerUserId: ownerUserId,
+        after: savedSuccessor,
+        session,
+      })
+    })
+  } finally {
+    await session.endSession()
+  }
+
+  response.status(201).json({
+    parent: normalizeDepositDoc(savedParent),
+    successor: savedSuccessor,
+  })
 })
 
 app.post('/api/deposits/:id/archive', writeRateLimiter, requireAuth, validateRequest(idParamSchema, 'params'), validateRequest(ownerScopedQuerySchema, 'query'), resolvePortfolioContext, requirePortfolioWriteAccess, async (request, response) => {

@@ -148,7 +148,7 @@ The backend lives in `server/index.js` and exposes these route groups:
 - Demo: `/api/demo/portfolio`, `/api/demo/tax-estimation`
 - Auth: `/api/auth/session`, `/api/auth/google`, `/api/auth/logout`
 - Sharing: `/api/shares`
-- Investments: `/api/deposits`, `/api/deposits/:id`, `/api/deposits/:id/archive`
+- Investments: `/api/deposits`, `/api/deposits/:id`, `/api/deposits/:id/renew`, `/api/deposits/:id/archive`
 - Salary savings: `/api/salary-savings`, `/api/salary-savings/:id`
 - Master data: `/api/master-data`
 - Tax: `/api/tax-estimation`
@@ -167,8 +167,8 @@ Most portfolio routes are owner-scoped. Shared portfolios are read-only for gues
 - Owner aliases and owner tax slab rates feed search and tax estimation.
 - Periodic payout products can generate interest events before maturity.
 - Quarterly payouts can opt into prorated first and final interest periods; optional overrides capture actual gross/net amounts while regular quarterly payouts retain the configured payout amount.
-- Salary savings records are tracked per month and financial year, with separate invested, unavailable, and remaining totals. Salary allocations link to investments and are summarized when editing an investment.
-- Version 2 backups validate sheet counts and include salary savings; version 1 backups without that sheet preserve existing salary records only when their links remain valid. Backups cover portfolio data, not users, sessions, shares, or audit history.
+- Salary savings records are tracked per month and financial year. Closed investments remain in expandable history while only open successor allocations count as invested; unassigned amounts remain available to invest.
+- Version 3 backups validate sheet counts, include salary savings, and preserve investment parent lineage. Version 1 and 2 backups remain supported; version 1 backups without the salary sheet preserve existing salary records only when their links remain valid. Backups cover portfolio data, not users, sessions, shares, or audit history.
 - Dashboard FY gross interest receipts are separate from taxable interest estimates: the receipt view shows interest scheduled in the selected FY before TDS, including maturity interest that may have accrued across earlier FYs.
 - Archive prevents removing investments still used as funding sources.
 - Hard delete is admin-only and cleans dependent funding links; investments with salary savings links cannot be archived or permanently deleted until those links are removed.

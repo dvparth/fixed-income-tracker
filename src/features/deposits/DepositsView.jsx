@@ -66,6 +66,7 @@ export default function DepositsView({
   startCloning,
   startEditing,
   renewInvestment,
+  salarySavings,
   renewingInvestmentId,
   startArchive,
   cancelArchive,
@@ -110,6 +111,7 @@ export default function DepositsView({
     principalAmount: '',
     maturityBeforeTax: '',
     actualMaturityCash: '',
+    salaryAllocations: [],
   })
   const [renewError, setRenewError] = useState('')
   const hasViewFilters =
@@ -189,11 +191,20 @@ export default function DepositsView({
 
   const openRenewInvestmentPopup = (deposit) => {
     const defaultAmount = getRenewalDefaultAmount(deposit)
+    const salaryAllocations = salarySavings.flatMap((saving) => {
+      const linkedAmount = (saving.investmentAllocations || [])
+        .filter((allocation) => allocation.investmentId === deposit.id && !allocation.isHistorical)
+        .reduce((sum, allocation) => sum + Number(allocation.amount || 0), 0)
+      return linkedAmount > 0
+        ? [{ salarySavingId: saving.id, salaryMonth: saving.salaryMonth, linkedAmount, amount: String(linkedAmount) }]
+        : []
+    })
     setRenewTargetId(deposit.id)
     setRenewDraft({
       principalAmount: defaultAmount > 0 ? String(defaultAmount) : '',
       maturityBeforeTax: defaultAmount > 0 ? String(defaultAmount) : '',
       actualMaturityCash: defaultAmount > 0 ? String(defaultAmount) : '',
+      salaryAllocations,
     })
     setRenewError('')
   }
@@ -204,6 +215,7 @@ export default function DepositsView({
       principalAmount: '',
       maturityBeforeTax: '',
       actualMaturityCash: '',
+      salaryAllocations: [],
     })
     setRenewError('')
   }
@@ -238,6 +250,20 @@ export default function DepositsView({
     }
     if (Number(renewDraft.principalAmount || 0) > Number(renewDraft.actualMaturityCash || 0)) {
       setRenewError('New investment value cannot exceed actual maturity cash.')
+      return
+    }
+    const salaryAllocationTotal = renewDraft.salaryAllocations.reduce(
+      (sum, allocation) => sum + Number(allocation.amount || 0),
+      0,
+    )
+    if (salaryAllocationTotal > Number(renewDraft.principalAmount || 0) + 0.0001) {
+      setRenewError('Salary amounts assigned cannot exceed the new investment value.')
+      return
+    }
+    if (renewDraft.salaryAllocations.some((allocation) =>
+      Number(allocation.amount || 0) > allocation.linkedAmount + 0.0001,
+    )) {
+      setRenewError('Each salary amount cannot exceed its amount linked to the existing investment.')
       return
     }
 
@@ -1399,6 +1425,38 @@ export default function DepositsView({
                     />
                   </label>
                 </div>
+                {renewDraft.salaryAllocations.length > 0 ? (
+                  <section className="salary-lines">
+                    <div className="section-head">
+                      <div>
+                        <h3>Carry salary funding forward</h3>
+                        <p>Assign any portion of each salary source to the successor. Unassigned amounts return to “To be invested”.</p>
+                      </div>
+                    </div>
+                    {renewDraft.salaryAllocations.map((allocation, index) => (
+                      <label className="field salary-line" key={allocation.salarySavingId}>
+                        <span>{allocation.salaryMonth} · previously linked {formatCurrency(allocation.linkedAmount)}</span>
+                        <input
+                          type="number"
+                          min="0"
+                          max={allocation.linkedAmount}
+                          step="0.01"
+                          value={allocation.amount}
+                          onChange={(event) => {
+                            const value = event.target.value
+                            setRenewDraft((current) => ({
+                              ...current,
+                              salaryAllocations: current.salaryAllocations.map((item, itemIndex) =>
+                                itemIndex === index ? { ...item, amount: value } : item,
+                              ),
+                            }))
+                            setRenewError('')
+                          }}
+                        />
+                      </label>
+                    ))}
+                  </section>
+                ) : null}
                 {renewError ? <p className="field-error">{renewError}</p> : null}
                 <div className="backup-confirm-modal-actions">
                   <button
