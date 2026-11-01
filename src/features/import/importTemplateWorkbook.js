@@ -1,4 +1,3 @@
-import * as XLSX from 'xlsx'
 import {
   INVESTMENT_IMPORT_COLUMNS,
   INVESTMENT_IMPORT_INSTRUCTIONS,
@@ -26,15 +25,24 @@ const SAMPLE_IMPORT_ROW = [
   'Sample row. Replace with your real investment values.',
 ]
 
-export const downloadInvestmentImportTemplate = () => {
-  const workbook = XLSX.utils.book_new()
-  const investmentsSheet = XLSX.utils.aoa_to_sheet([
+export const downloadInvestmentImportTemplate = async () => {
+  const { default: ExcelJS } = await import('exceljs')
+  const workbook = new ExcelJS.Workbook()
+  const investmentsSheet = workbook.addWorksheet(INVESTMENT_IMPORT_SHEET_NAME)
+  investmentsSheet.addRows([
     INVESTMENT_IMPORT_COLUMNS,
     SAMPLE_IMPORT_ROW,
   ])
-  const instructionsSheet = XLSX.utils.aoa_to_sheet(INVESTMENT_IMPORT_INSTRUCTIONS)
+  const instructionsSheet = workbook.addWorksheet('Instructions')
+  instructionsSheet.addRows(INVESTMENT_IMPORT_INSTRUCTIONS)
 
-  XLSX.utils.book_append_sheet(workbook, investmentsSheet, INVESTMENT_IMPORT_SHEET_NAME)
-  XLSX.utils.book_append_sheet(workbook, instructionsSheet, 'Instructions')
-  XLSX.writeFileXLSX(workbook, 'yieldflow-investment-import-template.xlsx')
+  const buffer = await workbook.xlsx.writeBuffer()
+  const url = URL.createObjectURL(new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = 'yieldflow-investment-import-template.xlsx'
+  link.click()
+  URL.revokeObjectURL(url)
 }

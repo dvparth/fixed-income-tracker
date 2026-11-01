@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict'
 import { createHmac } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import { basename } from 'node:path'
 import test from 'node:test'
 import mongoose from 'mongoose'
 import request from 'supertest'
+import ExcelJS from 'exceljs'
 
 process.env.NODE_ENV = 'production'
 process.env.SERVER_DISABLE_START = 'true'
@@ -206,6 +209,19 @@ test('sandbox exports, previews, replaces, and verifies a synthetic portfolio wi
     .expect(200)
   assert.ok(Buffer.isBuffer(exported.body), 'export endpoint should return an XLSX buffer')
   assert.match(exported.headers['content-type'], /spreadsheetml\.sheet/)
+  const exportedWorkbook = new ExcelJS.Workbook()
+  await exportedWorkbook.xlsx.load(exported.body)
+  assert.deepEqual(exportedWorkbook.worksheets.map((sheet) => sheet.name), [
+    'Metadata',
+    'Owners',
+    'Institutions',
+    'Branches',
+    'InstrumentTypes',
+    'Deposits',
+    'Salary Savings',
+  ])
+  assert.equal(exportedWorkbook.getWorksheet('Deposits').rowCount, 2)
+  assert.equal(exportedWorkbook.getWorksheet('Salary Savings').rowCount, 2)
 
   const preview = await authenticatedRequest('post', route('/api/data-backup/preview'))
     .set('Origin', 'https://backup-sandbox.example.test')
@@ -253,6 +269,82 @@ test('sandbox exports, previews, replaces, and verifies a synthetic portfolio wi
   assert.deepEqual(store.masterData.owners, before.masterData.owners)
   assert.equal(store.deposits.some((deposit) => deposit.id === 'destination-only-investment'), false)
   assert.equal(store.salarySavings.some((saving) => saving.id === 'destination-only-salary'), false)
+})
+
+test('sandbox rejects invalid backup uploads without changing portfolio data', async () => {
+  const before = clone({
+    deposits: store.deposits,
+    salarySavings: store.salarySavings,
+    masterData: store.masterData,
+  })
+  const malformedWorkbook = new ExcelJS.Workbook()
+  malformedWorkbook.addWorksheet('Not a backup').addRow(['unexpected'])
+  const malformedBuffer = Buffer.from(await malformedWorkbook.xlsx.writeBuffer())
+
+  await authenticatedRequest('post', route('/api/data-backup/preview'))
+    .set('Origin', 'https://backup-sandbox.example.test')
+    .attach('file', malformedBuffer, 'malformed.xlsx')
+    .expect(400)
+
+  await authenticatedRequest('post', route('/api/data-backup/preview'))
+    .set('Origin', 'https://backup-sandbox.example.test')
+    .attach('file', Buffer.from('not an Excel workbook'), 'malformed.xlsx')
+    .expect(400)
+
+  await authenticatedRequest('post', route('/api/data-backup/restore'))
+    .set('Origin', 'https://backup-sandbox.example.test')
+    .attach('file', malformedBuffer, 'malformed.xlsx')
+    .expect(400)
+
+  await authenticatedRequest('post', route('/api/data-backup/preview'))
+    .set('Origin', 'https://backup-sandbox.example.test')
+    .attach('file', malformedBuffer, 'malformed.csv')
+    .expect(400)
+
+  assert.deepEqual(store.deposits, before.deposits)
+  assert.deepEqual(store.salarySavings, before.salarySavings)
+  assert.deepEqual(store.masterData, before.masterData)
+})
+
+test('sandbox imports and re-exports an attached backup workbook without MongoDB', {
+  skip: !process.env.YIELDFLOW_SANDBOX_WORKBOOK,
+}, async () => {
+  const filePath = process.env.YIELDFLOW_SANDBOX_WORKBOOK
+  const fileBuffer = await readFile(filePath)
+  const fileName = basename(filePath)
+  const preview = await authenticatedRequest('post', route('/api/data-backup/preview'))
+    .set('Origin', 'https://backup-sandbox.example.test')
+    .attach('file', fileBuffer, fileName)
+    .expect((response) => {
+      assert.equal(response.status, 200, 'attached backup should pass sandbox preview')
+    })
+
+  assert.equal(preview.body.hasErrors, false, 'attached backup should pass snapshot validation')
+
+  const restored = await authenticatedRequest('post', route('/api/data-backup/restore'))
+    .set('Origin', 'https://backup-sandbox.example.test')
+    .field('confirmSourceIdentity', 'true')
+    .attach('file', fileBuffer, fileName)
+    .expect((response) => {
+      assert.equal(response.status, 200, 'attached backup should restore in the isolated sandbox')
+    })
+
+  const exported = await authenticatedRequest('get', route('/api/data-backup/export'))
+    .buffer(true)
+    .parse(parseBinary)
+    .expect(200)
+  assert.ok(Buffer.isBuffer(exported.body), 'sandbox export should return an XLSX buffer')
+
+  const roundTrip = await authenticatedRequest('post', route('/api/data-backup/preview'))
+    .set('Origin', 'https://backup-sandbox.example.test')
+    .attach('file', exported.body, 'sandbox-round-trip.xlsx')
+    .expect((response) => {
+      assert.equal(response.status, 200, 'exported backup should pass sandbox preview')
+    })
+
+  assert.equal(roundTrip.body.hasErrors, false, 'exported backup should remain restorable')
+  assert.equal(roundTrip.body.summary.investmentCount, restored.body.summary.investmentCount)
+  assert.equal(roundTrip.body.summary.salarySavingsCount, restored.body.summary.salarySavingsCount)
 })
 
 test('sandbox does not connect to MongoDB or keep test monkey patches installed', async () => {

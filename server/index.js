@@ -6,7 +6,7 @@ import { rateLimit, ipKeyGenerator } from 'express-rate-limit'
 import helmet from 'helmet'
 import mongoose from 'mongoose'
 import multer from 'multer'
-import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 import { z, ZodError } from 'zod'
 import { DEFAULT_DEMO_OWNER_ID, DEMO_PORTFOLIO_LABEL } from '../shared/demoPortfolio.js'
 import { generateOwnerWiseFYTaxSummary, parseFinancialYearLabel } from '../shared/fyTaxEngine.js'
@@ -586,12 +586,11 @@ const normalizeImportDate = (value) => {
   }
 
   if (typeof value === 'number' && Number.isFinite(value)) {
-    const parsed = XLSX.SSF.parse_date_code(value)
-    if (!parsed) {
-      return ''
+    const serialDay = Math.floor(value)
+    const candidate = new Date(1899, 11, (serialDay < 60 ? 31 : 30) + serialDay)
+    if (serialDay === 60) {
+      candidate.setDate(candidate.getDate() + 1)
     }
-
-    const candidate = new Date(parsed.y, parsed.m - 1, parsed.d)
     return Number.isNaN(candidate.getTime()) ? '' : toYmd(candidate)
   }
 
@@ -926,26 +925,52 @@ const buildDetailedHealthPayload = () => {
   }
 }
 
-const parseImportWorkbook = (buffer) => {
-  const workbook = XLSX.read(buffer, {
-    type: 'buffer',
-    cellDates: true,
+const getWorksheetRows = (worksheet) => {
+  const headers = worksheet.getRow(1).values.slice(1).map((value) => String(value ?? '').trim())
+  const rows = []
+
+  worksheet.eachRow((row, rowNumber) => {
+    if (rowNumber === 1) {
+      return
+    }
+
+    const record = {}
+    headers.forEach((header, index) => {
+      if (!header) {
+        return
+      }
+
+      let value = row.getCell(index + 1).value
+      if (value && typeof value === 'object' && !(value instanceof Date)) {
+        if ('result' in value) {
+          value = value.result
+        } else if ('text' in value) {
+          value = value.text
+        } else if ('richText' in value) {
+          value = value.richText.map((item) => item.text).join('')
+        }
+      }
+      record[header] = value ?? ''
+    })
+
+    if (Object.values(record).some((value) => value !== '')) {
+      rows.push(record)
+    }
   })
 
-  const worksheet = workbook.Sheets[INVESTMENT_IMPORT_SHEET_NAME]
+  return rows
+}
+
+const parseImportWorkbook = async (buffer) => {
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(buffer)
+
+  const worksheet = workbook.getWorksheet(INVESTMENT_IMPORT_SHEET_NAME)
   if (!worksheet) {
     throw new Error(`Workbook must contain a sheet named "${INVESTMENT_IMPORT_SHEET_NAME}"`)
   }
 
-  const rows = XLSX.utils.sheet_to_json(worksheet, {
-    defval: '',
-    raw: true,
-  })
-
-  return {
-    worksheet,
-    rows,
-  }
+  return { worksheet, rows: getWorksheetRows(worksheet) }
 }
 
 const mergeMasterDataForImport = (masterData, additions) => {
@@ -1103,8 +1128,18 @@ const sanitizeDepositForBackupExport = (deposit) => ({
     : [],
 })
 
-const buildBackupWorkbookBuffer = ({ portfolioLabel, ownerUserId, deposits, masterData, salarySavings = [] }) => {
-  const workbook = XLSX.utils.book_new()
+const addWorkbookRows = (workbook, sheetName, rows) => {
+  const worksheet = workbook.addWorksheet(sheetName)
+  const headers = Object.keys(rows[0] || {})
+  if (headers.length) {
+    worksheet.addRow(headers)
+    rows.forEach((row) => worksheet.addRow(headers.map((header) => row[header] ?? '')))
+  }
+  return worksheet
+}
+
+const buildBackupWorkbookBuffer = async ({ portfolioLabel, ownerUserId, deposits, masterData, salarySavings = [] }) => {
+  const workbook = new ExcelJS.Workbook()
   const exportedAt = new Date().toISOString()
   const normalizedMasterData = normalizeMasterData(masterData)
   const normalizedDeposits = deposits.map((deposit) => {
@@ -1179,39 +1214,13 @@ const buildBackupWorkbookBuffer = ({ portfolioLabel, ownerUserId, deposits, mast
     [BACKUP_DEPOSIT_JSON_COLUMN]: JSON.stringify(deposit),
   }))
 
-  XLSX.utils.book_append_sheet(
-    workbook,
-    XLSX.utils.json_to_sheet(metadataRows, { skipHeader: false }),
-    BACKUP_SHEETS.metadata,
-  )
-  XLSX.utils.book_append_sheet(
-    workbook,
-    XLSX.utils.json_to_sheet(ownerRows, { skipHeader: false }),
-    BACKUP_SHEETS.owners,
-  )
-  XLSX.utils.book_append_sheet(
-    workbook,
-    XLSX.utils.json_to_sheet(institutionRows, { skipHeader: false }),
-    BACKUP_SHEETS.institutions,
-  )
-  XLSX.utils.book_append_sheet(
-    workbook,
-    XLSX.utils.json_to_sheet(branchRows, { skipHeader: false }),
-    BACKUP_SHEETS.branches,
-  )
-  XLSX.utils.book_append_sheet(
-    workbook,
-    XLSX.utils.json_to_sheet(instrumentRows, { skipHeader: false }),
-    BACKUP_SHEETS.instrumentTypes,
-  )
-  XLSX.utils.book_append_sheet(
-    workbook,
-    XLSX.utils.json_to_sheet(depositRows, { skipHeader: false }),
-    BACKUP_SHEETS.deposits,
-  )
-  XLSX.utils.book_append_sheet(
-    workbook,
-    XLSX.utils.json_to_sheet(salarySavings.map((saving) => {
+  addWorkbookRows(workbook, BACKUP_SHEETS.metadata, metadataRows)
+  addWorkbookRows(workbook, BACKUP_SHEETS.owners, ownerRows)
+  addWorkbookRows(workbook, BACKUP_SHEETS.institutions, institutionRows)
+  addWorkbookRows(workbook, BACKUP_SHEETS.branches, branchRows)
+  addWorkbookRows(workbook, BACKUP_SHEETS.instrumentTypes, instrumentRows)
+  addWorkbookRows(workbook, BACKUP_SHEETS.deposits, depositRows)
+  addWorkbookRows(workbook, BACKUP_SHEETS.salarySavings, salarySavings.map((saving) => {
       const snapshot = { ...saving }
       delete snapshot._id
       delete snapshot.__v
@@ -1221,23 +1230,18 @@ const buildBackupWorkbookBuffer = ({ portfolioLabel, ownerUserId, deposits, mast
         Amount: saving.amount,
         [BACKUP_SALARY_SAVINGS_JSON_COLUMN]: JSON.stringify(snapshot),
       }
-    }), { skipHeader: false }),
-    BACKUP_SHEETS.salarySavings,
-  )
+    }))
 
-  return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' })
+  return Buffer.from(await workbook.xlsx.writeBuffer())
 }
 
 const getBackupSheetRows = (workbook, sheetName) => {
-  const worksheet = workbook.Sheets[sheetName]
+  const worksheet = workbook.getWorksheet(sheetName)
   if (!worksheet) {
     throw new Error(`Backup file must contain a sheet named "${sheetName}"`)
   }
 
-  return XLSX.utils.sheet_to_json(worksheet, {
-    defval: '',
-    raw: false,
-  })
+  return getWorksheetRows(worksheet)
 }
 
 const parseDelimitedList = (value) =>
@@ -1246,11 +1250,9 @@ const parseDelimitedList = (value) =>
     .map((entry) => entry.trim())
     .filter(Boolean)
 
-const parseBackupWorkbook = (buffer) => {
-  const workbook = XLSX.read(buffer, {
-    type: 'buffer',
-    cellDates: false,
-  })
+const parseBackupWorkbook = async (buffer) => {
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(buffer)
 
   const metadataRows = getBackupSheetRows(workbook, BACKUP_SHEETS.metadata)
   const ownerRows = getBackupSheetRows(workbook, BACKUP_SHEETS.owners)
@@ -1258,9 +1260,9 @@ const parseBackupWorkbook = (buffer) => {
   const branchRows = getBackupSheetRows(workbook, BACKUP_SHEETS.branches)
   const instrumentRows = getBackupSheetRows(workbook, BACKUP_SHEETS.instrumentTypes)
   const depositRows = getBackupSheetRows(workbook, BACKUP_SHEETS.deposits)
-  const salarySavingsSheetPresent = Boolean(workbook.Sheets[BACKUP_SHEETS.salarySavings])
+  const salarySavingsSheetPresent = Boolean(workbook.getWorksheet(BACKUP_SHEETS.salarySavings))
   const salaryRows = salarySavingsSheetPresent
-    ? XLSX.utils.sheet_to_json(workbook.Sheets[BACKUP_SHEETS.salarySavings], { defval: '', raw: false })
+    ? getWorksheetRows(workbook.getWorksheet(BACKUP_SHEETS.salarySavings))
     : []
 
   const institutionsById = new Map(
@@ -3356,7 +3358,7 @@ app.post(
     let rows
 
     try {
-      rows = parseImportWorkbook(request.file.buffer).rows
+      rows = (await parseImportWorkbook(request.file.buffer)).rows
     } catch (error) {
       response.status(400).json({ message: error.message })
       return
@@ -4224,7 +4226,7 @@ app.get(
       SalarySaving.find({ ownerUserId: request.portfolioContext.ownerUserId }).lean(),
     ])
 
-    const workbookBuffer = buildBackupWorkbookBuffer({
+    const workbookBuffer = await buildBackupWorkbookBuffer({
       portfolioLabel: request.portfolioContext.ownerDisplayName || 'portfolio',
       ownerUserId: request.portfolioContext.ownerUserId,
       deposits,
@@ -4264,7 +4266,7 @@ app.post(
     }
 
     try {
-      const parsed = parseBackupWorkbook(request.file.buffer)
+      const parsed = await parseBackupWorkbook(request.file.buffer)
       const existingSalarySavings = parsed.salarySavingsSheetPresent
         ? []
         : await SalarySaving.find({ ownerUserId: request.portfolioContext.ownerUserId }).lean()
@@ -4312,7 +4314,7 @@ app.post(
     let validation
     let existingSalarySavings
     try {
-      const parsed = parseBackupWorkbook(request.file.buffer)
+      const parsed = await parseBackupWorkbook(request.file.buffer)
       existingSalarySavings = await SalarySaving.find({
         ownerUserId: request.portfolioContext.ownerUserId,
       }).lean()
@@ -4500,5 +4502,11 @@ if (process.env.NODE_ENV !== 'test' && process.env.SERVER_DISABLE_START !== 'tru
   })
 }
 
-export { buildBackupWorkbookBuffer, parseBackupWorkbook, validateBackupSnapshot }
+export {
+  buildBackupWorkbookBuffer,
+  normalizeImportDate,
+  parseBackupWorkbook,
+  parseImportWorkbook,
+  validateBackupSnapshot,
+}
 export default app

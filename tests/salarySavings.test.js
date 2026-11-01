@@ -3,7 +3,7 @@ import { createHmac } from 'node:crypto'
 import test from 'node:test'
 import mongoose from 'mongoose'
 import request from 'supertest'
-import XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 import {
   filterSavingsByFinancialYear,
   splitInvestmentAllocations,
@@ -22,7 +22,9 @@ process.env.SERVER_ALLOWED_ORIGINS = 'https://app.example.test'
 const {
   default: app,
   buildBackupWorkbookBuffer,
+  normalizeImportDate,
   parseBackupWorkbook,
+  parseImportWorkbook,
   validateBackupSnapshot,
 } = await import('../server/index.js')
 const ownerUserId = '65f000000000000000000001'
@@ -147,6 +149,28 @@ const validate = (salarySavings, deposits = [], overrides = {}) => validateBacku
   ...overrides,
 })
 
+test('investment import parser reads xlsx rows and preserves date and numeric cell values', async () => {
+  const workbook = new ExcelJS.Workbook()
+  const worksheet = workbook.addWorksheet('Investments')
+  worksheet.addRow(['Holder', 'Investment Date', 'Principal Amount'])
+  worksheet.addRow(['Owner', new Date('2026-04-01T00:00:00.000Z'), 1000])
+
+  const { rows } = await parseImportWorkbook(Buffer.from(await workbook.xlsx.writeBuffer()))
+
+  assert.deepEqual(rows, [{
+    Holder: 'Owner',
+    'Investment Date': new Date('2026-04-01T00:00:00.000Z'),
+    'Principal Amount': 1000,
+  }])
+})
+
+test('import date normalization preserves Excel serial date boundaries', () => {
+  assert.equal(normalizeImportDate(1), '1900-01-01')
+  assert.equal(normalizeImportDate(59), '1900-02-28')
+  assert.equal(normalizeImportDate(60), '1900-03-01')
+  assert.equal(normalizeImportDate(61), '1900-03-01')
+})
+
 test('salary savings financial years include April through March boundaries', () => {
   const savings = [
     { salaryMonth: '2026-03' },
@@ -211,21 +235,21 @@ test('investment salary funding only includes links to the selected investment',
   })
 })
 
-test('backup parser preserves malformed salary rows for validation', () => {
-  const workbook = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([['Field', 'Value']]), 'Metadata')
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([['ID', 'Name']]), 'Owners')
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([['ID', 'Name']]), 'Institutions')
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([['Institution ID', 'Branch ID']]), 'Branches')
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([['ID', 'Name']]), 'InstrumentTypes')
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([['Investment ID']]), 'Deposits')
-  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+test('backup parser preserves malformed salary rows for validation', async () => {
+  const workbook = new ExcelJS.Workbook()
+  workbook.addWorksheet('Metadata').addRows([['Field', 'Value']])
+  workbook.addWorksheet('Owners').addRows([['ID', 'Name']])
+  workbook.addWorksheet('Institutions').addRows([['ID', 'Name']])
+  workbook.addWorksheet('Branches').addRows([['Institution ID', 'Branch ID']])
+  workbook.addWorksheet('InstrumentTypes').addRows([['ID', 'Name']])
+  workbook.addWorksheet('Deposits').addRows([['Investment ID']])
+  workbook.addWorksheet('Salary Savings').addRows([
     ['Record Data'],
     [JSON.stringify(salarySaving({ investmentAllocations: [] }))],
     ['{invalid json'],
-  ]), 'Salary Savings')
+  ])
 
-  const parsed = parseBackupWorkbook(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }))
+  const parsed = await parseBackupWorkbook(await workbook.xlsx.writeBuffer())
 
   assert.equal(parsed.salarySavings.length, 2)
   assert.equal(parsed.salarySavings[1].rowNumber, 3)
@@ -327,7 +351,7 @@ test('backup validation rejects missing version, metadata count mismatch, and in
   assert.ok(invalidDate.rowErrors[0].messages.some((message) => message.includes('Investment date')))
 })
 
-test('current backup format exports and validates investment and salary data', () => {
+test('current backup format exports and validates investment and salary data', async () => {
   const investment = {
     ...validDeposit().payload,
     ownerUserId,
@@ -347,7 +371,7 @@ test('current backup format exports and validates investment and salary data', (
     createdAt: new Date('2026-04-01T00:00:00.000Z'),
     updatedAt: new Date('2026-04-02T00:00:00.000Z'),
   }
-  const workbookBuffer = buildBackupWorkbookBuffer({
+  const workbookBuffer = await buildBackupWorkbookBuffer({
     portfolioLabel: 'Test Owner',
     ownerUserId,
     deposits: [investment],
@@ -358,7 +382,7 @@ test('current backup format exports and validates investment and salary data', (
     },
     salarySavings: [saving],
   })
-  const parsed = parseBackupWorkbook(workbookBuffer)
+  const parsed = await parseBackupWorkbook(workbookBuffer)
   const result = validateBackupSnapshot(parsed)
 
   assert.equal(result.hasErrors, false, result.errors.join(' '))
@@ -373,7 +397,7 @@ test('current backup format exports and validates investment and salary data', (
   assert.equal(result.snapshot.salarySavings[0].createdAt, saving.createdAt.toISOString())
 })
 
-test('version 3 backup preserves parent lineage and closed salary links without double-counting', () => {
+test('version 3 backup preserves parent lineage and closed salary links without double-counting', async () => {
   const parent = {
     ...validDeposit().payload,
     id: 'parent-investment',
@@ -398,7 +422,7 @@ test('version 3 backup preserves parent lineage and closed salary links without 
     }),
     ownerUserId,
   }
-  const workbookBuffer = buildBackupWorkbookBuffer({
+  const workbookBuffer = await buildBackupWorkbookBuffer({
     portfolioLabel: 'Test Owner',
     ownerUserId,
     deposits: [parent, successor],
@@ -409,7 +433,7 @@ test('version 3 backup preserves parent lineage and closed salary links without 
     },
     salarySavings: [saving],
   })
-  const parsed = parseBackupWorkbook(workbookBuffer)
+  const parsed = await parseBackupWorkbook(workbookBuffer)
   const result = validateBackupSnapshot(parsed)
 
   assert.equal(parsed.metadataRows.find((row) => row.Field === 'Workbook version').Value, '3')
@@ -444,7 +468,7 @@ test('backup validation rejects missing, open, self-referencing, and cyclic inve
 
 test('backup preview shows source identity and restore requires confirmation for another portfolio', async () => {
   const foreignOwnerId = '65f000000000000000000099'
-  const workbookBuffer = buildBackupWorkbookBuffer({
+  const workbookBuffer = await buildBackupWorkbookBuffer({
     portfolioLabel: 'Another Owner',
     ownerUserId: foreignOwnerId,
     deposits: [{
@@ -513,7 +537,7 @@ test('backup restore aborts its transaction when a collection write fails', asyn
   })
 
   try {
-    const workbookBuffer = buildBackupWorkbookBuffer({
+    const workbookBuffer = await buildBackupWorkbookBuffer({
       portfolioLabel: 'Test Owner',
       ownerUserId,
       deposits: [{
@@ -591,7 +615,7 @@ test('backup restore converts investment and salary timestamps back to dates', a
   try {
     const investmentCreatedAt = new Date('2026-01-02T03:04:05.000Z')
     const savingCreatedAt = new Date('2026-04-01T00:00:00.000Z')
-    const workbookBuffer = buildBackupWorkbookBuffer({
+    const workbookBuffer = await buildBackupWorkbookBuffer({
       portfolioLabel: 'Test Owner',
       ownerUserId,
       deposits: [{
