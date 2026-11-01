@@ -8,7 +8,11 @@ import mongoose from 'mongoose'
 import multer from 'multer'
 import ExcelJS from 'exceljs'
 import { z, ZodError } from 'zod'
-import { DEFAULT_DEMO_OWNER_ID, DEMO_PORTFOLIO_LABEL } from '../shared/demoPortfolio.js'
+import {
+  buildDemoPortfolioSnapshot,
+  DEFAULT_DEMO_OWNER_ID,
+  DEMO_PORTFOLIO_LABEL,
+} from '../shared/demoPortfolio.js'
 import { generateOwnerWiseFYTaxSummary, parseFinancialYearLabel } from '../shared/fyTaxEngine.js'
 import {
   INVESTMENT_IMPORT_REQUIRED_COLUMNS,
@@ -301,6 +305,7 @@ const {
 const routeDependencies = {
   ...coreServices,
   ...workbookServices,
+  buildDemoPortfolioSnapshot,
   DEMO_ENABLED,
   DEMO_OWNER_ID,
   DEMO_PORTFOLIO_LABEL,

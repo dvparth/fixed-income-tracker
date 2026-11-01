@@ -145,7 +145,7 @@ The client runs through Vite and proxies `/api` requests to the Express backend.
 The backend lives in `server/index.js` and exposes these route groups:
 
 - Health: `/api/health`, `/api/health/details`
-- Demo: `/api/demo/portfolio`, `/api/demo/tax-estimation`
+- Demo: `/api/demo/portfolio` (investments, master data, and read-only salary savings), `/api/demo/tax-estimation`
 - Auth: `/api/auth/session`, `/api/auth/google`, `/api/auth/logout`
 - Sharing: `/api/shares`
 - Investments: `/api/deposits`, `/api/deposits/:id`, `/api/deposits/:id/renew`, `/api/deposits/:id/archive`

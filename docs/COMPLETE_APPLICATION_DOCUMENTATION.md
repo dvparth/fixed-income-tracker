@@ -155,7 +155,7 @@ Admin status is resolved from the stored `systemRole` or membership in `SERVER_A
 
 ### 5.2 Demo
 
-- `GET /api/demo/portfolio`: public demo portfolio snapshot.
+- `GET /api/demo/portfolio`: public demo snapshot containing investments, master data, and read-only salary savings.
 - `GET /api/demo/tax-estimation?fy=<yyyy-yy>`: public demo tax estimate.
 
 Demo endpoints are hidden unless `SERVER_DEMO_ENABLED=true`. They use `SERVER_DEMO_OWNER_ID` and their own rate limit.

@@ -4,6 +4,7 @@ export const registerSystemRoutes = (app, dependencies) => {
     DEMO_OWNER_ID,
     DEMO_PORTFOLIO_LABEL,
     Deposit,
+    buildDemoPortfolioSnapshot,
     buildDetailedHealthPayload,
     buildHealthPayload,
     buildTaxEstimationInvestmentInput,
@@ -37,6 +38,30 @@ export const registerSystemRoutes = (app, dependencies) => {
     const normalizedDeposits = deposits.map((deposit) =>
       canonicalizeDepositAgainstMasterData(normalizeDepositDoc(deposit), normalizedMasterData),
     )
+    const investmentById = new Map(normalizedDeposits.map((investment) => [investment.id, investment]))
+    const demoSnapshot = buildDemoPortfolioSnapshot(DEMO_OWNER_ID)
+    const salarySavings = demoSnapshot.salarySavings.map((saving) => ({
+      ...saving,
+      unavailableAmount: saving.unavailable.reduce((sum, item) => sum + Number(item.amount || 0), 0),
+      investmentAllocations: saving.investmentAllocations.map((allocation) => {
+        const investment = investmentById.get(allocation.investmentId)
+        const isHistorical = Boolean(
+          allocation.isHistorical ||
+          !investment ||
+          String(investment.status || '').toLowerCase() === 'closed',
+        )
+        return {
+          ...allocation,
+          isHistorical,
+          investmentLabel: investment
+            ? `${investment.bankName || 'Investment'} · ${investment.accountNumber || investment.id}`
+            : 'Archived or removed investment',
+          investmentDate: investment?.investmentDate || '',
+          parentInvestmentId: investment?.parentInvestmentId || '',
+          parentInvestmentLabel: investmentById.get(investment?.parentInvestmentId)?.bankName || '',
+        }
+      }),
+    }))
 
     return {
       portfolio: {
@@ -46,6 +71,7 @@ export const registerSystemRoutes = (app, dependencies) => {
       },
       deposits: normalizedDeposits,
       masterData: normalizedMasterData,
+      salarySavings,
     }
   }
 

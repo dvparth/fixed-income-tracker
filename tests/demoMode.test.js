@@ -36,6 +36,7 @@ test('demo seed data uses one owner id and valid funding references', () => {
   const depositIds = new Set(demoSnapshot.deposits.map((deposit) => deposit.id))
 
   assert.ok(demoSnapshot.deposits.every((deposit) => deposit.ownerUserId === DEFAULT_DEMO_OWNER_ID))
+  assert.ok(demoSnapshot.salarySavings.every((saving) => saving.ownerUserId === DEFAULT_DEMO_OWNER_ID))
 
   demoSnapshot.deposits.forEach((deposit) => {
     ;(deposit.allocations || []).forEach((allocation) => {
@@ -52,6 +53,15 @@ test('demo seed data uses one owner id and valid funding references', () => {
       )
     })
   })
+
+  demoSnapshot.salarySavings.forEach((saving) => {
+    saving.investmentAllocations.forEach((allocation) => {
+      assert.ok(
+        depositIds.has(allocation.investmentId),
+        `Salary funding reference ${allocation.investmentId} should point to a seeded demo investment`,
+      )
+    })
+  })
 })
 
 test('demo portfolio is public and returns only demo portfolio data', async () => {
@@ -61,6 +71,11 @@ test('demo portfolio is public and returns only demo portfolio data', async () =
   assert.equal(response.body.portfolio.ownerUserId, DEFAULT_DEMO_OWNER_ID)
   assert.ok(response.body.deposits.length >= 10)
   assert.ok(response.body.masterData.owners.length >= 4)
+  assert.ok(response.body.salarySavings.length > 0)
+  assert.ok(response.body.salarySavings.every((saving) => saving.ownerUserId === DEFAULT_DEMO_OWNER_ID))
+  assert.ok(response.body.salarySavings.some((saving) =>
+    saving.investmentAllocations.some((allocation) => allocation.isHistorical),
+  ))
   assert.equal(response.body.authenticated, undefined)
   assert.equal(response.body.user, undefined)
   assert.equal(response.body.sessions, undefined)

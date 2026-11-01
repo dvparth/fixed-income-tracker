@@ -410,7 +410,7 @@ function App() {
     })
     setActivePortfolioOwnerId(demoResponse.portfolio?.ownerUserId || 'demo-owner-yieldflow')
     setDeposits(nextDeposits)
-    setSalarySavings([])
+    setSalarySavings(demoResponse.salarySavings || [])
     setMasterData(nextMasterData)
     setSelectedId((current) =>
       current && nextDeposits.some((deposit) => deposit.id === current)

@@ -488,6 +488,45 @@ export const demoDeposits = [
   },
 ]
 
+export const demoSalarySavings = [
+  {
+    id: 'demo-salary-2026-04',
+    salaryMonth: '2026-04',
+    amount: 120000,
+    unavailable: [
+      { id: 'demo-salary-2026-04-unavailable-1', amount: 10000, reason: 'Family expenses' },
+    ],
+    investmentAllocations: [
+      {
+        id: 'demo-salary-2026-04-investment-1',
+        investmentId: 'demo-fd-aarav-hdfc-2024',
+        amount: 70000,
+      },
+      {
+        id: 'demo-salary-2026-04-investment-2',
+        investmentId: 'demo-fd-huf-icici-closed-2022',
+        amount: 20000,
+        isHistorical: true,
+      },
+    ],
+    notes: 'Sample salary target with an active investment and closed investment history.',
+  },
+  {
+    id: 'demo-salary-2026-07',
+    salaryMonth: '2026-07',
+    amount: 95000,
+    unavailable: [],
+    investmentAllocations: [
+      {
+        id: 'demo-salary-2026-07-investment-1',
+        investmentId: 'demo-fd-nisha-sbi-quarterly-2024',
+        amount: 65000,
+      },
+    ],
+    notes: 'Sample target with an amount still available to invest.',
+  },
+]
+
 export const buildDemoPortfolioSnapshot = (ownerUserId = DEFAULT_DEMO_OWNER_ID) => ({
   ownerUserId,
   portfolioLabel: DEMO_PORTFOLIO_LABEL,
@@ -498,5 +537,11 @@ export const buildDemoPortfolioSnapshot = (ownerUserId = DEFAULT_DEMO_OWNER_ID) 
     createdByUserId: ownerUserId,
     updatedByUserId: ownerUserId,
     isDeleted: false,
+  })),
+  salarySavings: demoSalarySavings.map((saving) => ({
+    ...saving,
+    ownerUserId,
+    createdByUserId: ownerUserId,
+    updatedByUserId: ownerUserId,
   })),
 })
